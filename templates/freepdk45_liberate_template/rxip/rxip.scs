@@ -1,0 +1,88 @@
+simulator lang=spice
+
+.param terminated=1
+
+* --------------------------------------------------------------------------
+* RX PAD-to-PAD inter-lane coupling (on-die fringe cap, absolute fF)
+*   Small parasitic between adjacent chip-pad pins.  The dominant inter-lane
+*   coupling lives on the interposer trace and is already modelled inside
+*   txip.scs, so Cc_rx_pad_fF here only picks up the local PAD ring fringe
+*   cap.  The wrapper stitches 7 adjacent-pair Cc caps when
+*   coupling_cap.enabled=1 in the config.
+* --------------------------------------------------------------------------
+.param Cc_rx_pad_fF=1.0
+
+* --------------------------------------------------------------------------
+* All RX pad parasitics (ESD clamp, bump, chiplet pad) are now modelled
+* inside txip.scs so that their energy is captured by the TX Liberate run
+* and can be separated from the intrinsic RX device energy via the
+* tx_channel reference run.  The PAD port here is the bare pre-amp input.
+* --------------------------------------------------------------------------
+
+.subckt rx PAD VDD VSS out
+*
+* Thevenin split termination (SSTL / HSTL style)
+* -----------------------------------------------
+* Topology:  R_bias_hi (1 MOhm) from vterm to VDD
+*            R_bias_lo (1 MOhm) from vterm to VSS
+*            RT        (50 Ohm) from PAD  to vterm
+*
+* Why this topology was chosen:
+*   1. Liberate compatibility — Liberate's single-transition IO
+*      characterization model cannot handle AC-coupled (series-C, shunt-R)
+*      termination because the differentiating highpass response produces
+*      negative apparent delays and rebound warnings (LIB-449).
+*      A resistive shunt (Thevenin) avoids these issues entirely.
+*   2. VTERM mid-rail isolation — The high-impedance bias resistors
+*      (R_bias_hi, R_bias_lo = 1 MOhm) create a VDD/2 reference at
+*      vterm without routing significant static current through the
+*      VDD/VSS rails.  This keeps the Liberate-measured VDD power
+*      clean (only inverter switching), while the static termination
+*      power P_static = VDD^2 / (R_bias_hi + R_bias_lo) is accounted
+*      for analytically in the power model (~0.5 uW per lane at 1V).
+*   3. Industry precedent — SSTL and HSTL standards (DDR2/3/4, QDR)
+*      use split Thevenin termination to VREF = VDD/2.
+*
+* When terminated=0, all termination resistors are set to 1 GOhm
+* (effectively open), and the pre-amp gate sees rx_in directly.
+*
+R_bias_hi       vterm VDD    'terminated==1 ? 1e6  : 1e9'
+R_bias_lo       vterm VSS    'terminated==1 ? 1e6  : 1e9'
+RT              PAD   vterm  'terminated==1 ? 50   : 1e9'
+// Pre-amplifier (NMOS w=0.4u, PMOS w=0.6u)
+xnm1 out1 PAD VSS VSS nmos_vtg w=0.4u l=0.05u
+xpm1 out1 PAD VDD VDD pmos_vtg w=0.6u l=0.05u
+// Output buffer (NMOS w=1.2u, PMOS w=1.8u)
+xnm2 out  out1  VSS VSS nmos_vtg w=1.2u l=0.05u
+xpm2 out  out1  VDD VDD pmos_vtg w=1.8u l=0.05u
+.ends rx
+
+.subckt rxip \
+    PAD_0  PAD_1  PAD_2  PAD_3  \
+    PAD_4  PAD_5  PAD_6  PAD_7  \
+    PAD_8  PAD_9  PAD_10 PAD_11 \
+    PAD_12 PAD_13 PAD_14 PAD_15 \
+    VDD VSS \
+    OUT_0  OUT_1  OUT_2  OUT_3  \
+    OUT_4  OUT_5  OUT_6  OUT_7  \
+    OUT_8  OUT_9  OUT_10 OUT_11 \
+    OUT_12 OUT_13 OUT_14 OUT_15
+
+xrx0  PAD_0  VDD VSS OUT_0  rx
+xrx1  PAD_1  VDD VSS OUT_1  rx
+xrx2  PAD_2  VDD VSS OUT_2  rx
+xrx3  PAD_3  VDD VSS OUT_3  rx
+xrx4  PAD_4  VDD VSS OUT_4  rx
+xrx5  PAD_5  VDD VSS OUT_5  rx
+xrx6  PAD_6  VDD VSS OUT_6  rx
+xrx7  PAD_7  VDD VSS OUT_7  rx
+xrx8  PAD_8  VDD VSS OUT_8  rx
+xrx9  PAD_9  VDD VSS OUT_9  rx
+xrx10 PAD_10 VDD VSS OUT_10 rx
+xrx11 PAD_11 VDD VSS OUT_11 rx
+xrx12 PAD_12 VDD VSS OUT_12 rx
+xrx13 PAD_13 VDD VSS OUT_13 rx
+xrx14 PAD_14 VDD VSS OUT_14 rx
+xrx15 PAD_15 VDD VSS OUT_15 rx
+
+.ends rxip

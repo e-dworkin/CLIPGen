@@ -1,0 +1,44 @@
+# UCIe Advanced Package — 8-Column x32 Bump Map
+# Source: UCIe 1.0 Specification, Figure 5-29
+#
+# Recommended bump pitch: 51–55 um (32 GT/s)
+# Module depth at 55 um pitch: ~962.5 um
+#
+# Grid : 21 rows x 8 columns = 168 bumps total
+# Counts:
+#   tx    : 32  (txdata0-31, txdataRD0)
+#   rx    : 32  (rxdata0-31, rxdataRD0)
+#   vdd   : 36  (VCCIO / VCCFWDIO)
+#   vss   : 56  (VSS)
+#   other : 12  (rxcksBRD, txdatasBRD, rcksb, txdatasb,
+#                txckp, txckn, rxckp, rxckn,
+#                Txvld, Txtrk, Rxvld, Rxtrk)
+#   empty : 32
+#
+# Row 0 is farthest from die edge; Row 20 is at die edge.
+# Left half (col 0-3): TX side;  Right half (col 4-7): RX side.
+# Each data row carries 4 TX + 4 RX lanes (dense packing, no alternating).
+#
+#         Col0  Col1  Col2  Col3  Col4  Col5  Col6  Col7
+#         ------------------------------------------------
+vss  vss  vss  vss  vss  vss  vss  vss   # R00: VSS rail (top)
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R01: VCCIO rail
+other  other  vss  other  other  other  vss  other  # R02: rxcksBRD txdatasBRD rcksb txdatasb | txckp txckn rxckp rxckn
+tx  tx  tx  tx  rx  rx  rx  rx           # R03: Txdata0-3 | Rxdata0-3
+vss  vss  vss  vss  vss  vss  vss  vss   # R04: VSS
+tx  tx  tx  tx  rx  rx  rx  rx           # R05: Txdata4-7 | Rxdata4-7
+vdd  vss  vdd  vss  vdd  vss  vdd  vss   # R06: VCCIO/VSS
+tx  tx  tx  tx  rx  rx  rx  rx           # R07: Txdata8-11 | Rxdata8-11
+vss  vss  vss  vss  vss  vss  vss  vss   # R08: VSS
+tx  tx  tx  tx  rx  rx  rx  rx           # R09: Txdata12-15 | Rxdata12-15
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R10: VCCFWDIO (mid rail)
+tx  tx  tx  tx  rx  rx  rx  rx           # R11: Txdata16-19 | Rxdata16-19
+vss  vss  vss  vss  vss  vss  vss  vss   # R12: VSS
+tx  tx  tx  tx  rx  rx  rx  rx           # R13: Txdata20-23 | Rxdata20-23
+vdd  vss  vdd  vss  vdd  vss  vdd  vss   # R14: VCCIO/VSS
+tx  tx  tx  tx  rx  rx  rx  rx           # R15: Txdata24-27 | Rxdata24-27
+vss  vss  vss  vss  vss  vss  vss  vss   # R16: VSS
+tx  tx  tx  tx  rx  rx  rx  rx           # R17: Txdata28-31 | Rxdata28-31
+other  other  vss  other  other  other  vss  other  # R18: Txvld Txtrk VSS TxckRD | Rxvld Rxtrk VSS RxckRD
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R19: VCCFWDIO (die-edge power rail)
+vss  vss  vss  vss  vss  vss  vss  vss   # R20 (die edge): VSS

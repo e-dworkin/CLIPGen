@@ -1,0 +1,31 @@
+# UCIe Advanced Package — 16-Column x32 Bump Map
+# Source: UCIe 1.0 Specification, Figure 5-28
+#
+# Recommended bump pitch: 25–30 um (12 GT/s), 31–37 um (16 GT/s)
+# Module depth at 25 um pitch: ~237.5 um
+#
+# Grid : 10 rows x 16 columns = 160 bumps total
+# Counts:
+#   tx    : 32  (txdata0-31, txdataRD0)
+#   rx    : 32  (rxdata0-31, rxdataRD0)
+#   vdd   : 16  (VCCIO / VCCFWDIO)
+#   vss   : 44  (VSS)
+#   other : 12  (rxcksBRD, txdatasBRD, rcksb, txdatasb,
+#                txckp, txckn, rxckp, rxckn, txtrk, txvld, rxvld, rxtrk)
+#   empty : 24
+#
+# Row 0 is farthest from die edge; Row 9 is at die edge.
+# Left half (col 0-7): TX side;  Right half (col 8-15): RX side.
+#
+#         Col0  Col1  Col2  Col3  Col4  Col5  Col6  Col7  Col8  Col9  C10   C11   C12   C13   C14   C15
+#         --------------------------------------------------------------------------------------------
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss                 # R00: VSS rail (top)
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd                 # R01: VCCIO rail
+other  other  vss  vss  other  other  vss  other  other  vss  other  other  vss  vss  other  other  # R02: sideband/clock: rxcksBRD txdatasBRD rcksb txdatasb txckp txckn rxckp rxckn txtrk txvld rxvld rxtrk
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                                 # R03: Txdata0-7 | Rxdata0-7
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss                 # R04: VSS rail
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                                 # R05: Txdata8-15 | Rxdata8-15
+vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss                 # R06: VCCIO/VSS interleaved
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                                 # R07: Txdata16-23 | Rxdata16-23
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss                 # R08: VSS rail
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                                 # R09 (die edge): Txdata24-31 | Rxdata24-31

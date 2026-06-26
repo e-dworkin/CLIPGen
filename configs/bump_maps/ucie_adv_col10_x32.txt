@@ -1,0 +1,51 @@
+# UCIe Advanced Package — 10-Column x32 Bump Map
+# Source: UCIe 1.0 Specification, Figure 5-27
+#
+# Recommended bump pitch: 38–44 um (24 GT/s), 45–50 um (32 GT/s)
+# Module depth at 45 um pitch: ~680.5 um
+# Note: Rows 1, 2, and 53 required for packaging solutions using floating bridges
+#       without TSVs; optional for packaging solutions with TSVs.
+#
+# Grid : 26 rows x 10 columns = 260 bumps total
+# Counts:
+#   tx    : 32  (txdata0-31, txdataRD0)
+#   rx    : 32  (rxdata0-31, rxdataRD0)
+#   vdd   : 30  (VCCIO / VCCFWDIO)
+#   vss   : 104 (VSS)
+#   other : 14  (txdatasBRD, rxdatasBRD, txcksb, rxcksb,
+#                Txckp, Txckn, Rxckp, Rxckn, tckRD, rckRD,
+#                Txvld, Txtrk, Rxvld, Rxtrk)
+#   empty : 80
+#
+# Row 0 is farthest from die edge; Row 25 is at die edge.
+# Left half (col 0-4): TX side;  Right half (col 5-9): RX side.
+# Each data row carries 4 TX + 4 RX lanes (2 empty/power per side).
+#
+#         Col0  Col1  Col2  Col3  Col4  Col5  Col6  Col7  Col8  Col9
+#         -----------------------------------------------------------
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R00: VSS rail (top, bridge)
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R01: VCCIO (bridge)
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R02: VSS (bridge)
+other  vss  other  other  vss  vss  other  other  vss  other  # R03: sideband: txdatasBRD txcksb txckp rxcksb rxdatasBRD rxckp
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R04: Txdata0-3 | Rxdata0-3
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R05: VSS
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R06: Txdata4-7 | Rxdata4-7
+vdd  vss  vdd  vss  vdd  vdd  vss  vdd  vss  vdd   # R07: VCCIO/VSS
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R08: Txdata8-11 | Rxdata8-11
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R09: VSS
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R10: Txdata12-15 | Rxdata12-15
+vdd  vss  other  vss  vdd  vdd  vss  other  vss  vdd  # R11: VCCIO txckn/rxckn
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R12: Txdata16-19 | Rxdata16-19
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R13: VSS
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R14: Txdata20-23 | Rxdata20-23
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R15: VCCFWDIO (mid rail)
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R16: Txdata24-27 | Rxdata24-27
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R17: VSS
+-  tx  tx  tx  tx  -  rx  rx  rx  rx              # R18: Txdata28-31 | Rxdata28-31
+vdd  vss  other  vss  vdd  vdd  vss  other  vss  vdd  # R19: VCCIO txvld/rxtrk
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R20: VSS
+vdd  vss  other  vss  vdd  vdd  vss  other  vss  vdd  # R21: VCCIO txtrk/rxvld
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R22: VSS
+vdd  vdd  vss  vss  vdd  vdd  vdd  vss  vss  vdd   # R23: VCCIO/VSS
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R24: VSS
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R25 (die edge): VCCFWDIO

@@ -1,0 +1,194 @@
+simulator lang=spice
+
+* --------------------------------------------------------------------------
+* Switchable flags
+* --------------------------------------------------------------------------
+.param equalization=1
+.param channel_rc=1
+.param rx_pad_bump_rc=1
+
+* --------------------------------------------------------------------------
+* Inter-lane coupling-capacitance tuning knobs (Cc / Cg ratios)
+*   cc_ratio_trace ~ 0.3-0.5 for UCIe Advanced silicon-interposer traces
+*   cc_ratio_pad   ~ 0.1-0.3 for interposer landing pads
+* The wrapper stitches Cc = ratio * C_trace / C_pad between adjacent lanes
+* on every physically parallel node in the Pi-ladder.  The coupling caps
+* are auto-disabled (1e-30) when channel_rc=0.
+* --------------------------------------------------------------------------
+.param cc_ratio_trace=0.4
+.param cc_ratio_pad=0.2
+
+* --------------------------------------------------------------------------
+* Channel RC component values (patched by tx.py from channel.py output)
+*
+* Physical topology: TX chiplet pad -> TX ESD -> TX microbump -> TX interposer pad
+*                    -> interposer trace -> RX interposer pad
+*                    -> RX microbump -> RX chiplet pad  (new: rx_pad_bump_rc=1)
+*
+* Pad (chiplet)   :  C_pad_chip       R_pad_chip
+* ESD clamp       :  C_esd
+* Microbump       :  C_bump           R_bump
+* TX ipos pad     :  C_pad_ipos_tx    R_pad_ipos_tx
+* Trace Pi seg 1  :  C_tr_near    R_tr1  C_tr1
+* Trace Pi seg 2  :               R_tr2  C_tr2
+* Trace Pi seg 3  :               R_tr3  C_tr_far
+* RX ipos pad     :  C_pad_ipos       R_pad_ipos
+* RX microbump    :  C_rx_bump        R_rx_bump     (when rx_pad_bump_rc=1)
+* RX chiplet pad  :  C_rx_pad_chip    R_rx_pad_chip (when rx_pad_bump_rc=1)
+* RX ESD clamp    :  C_rx_esd                       (when rx_pad_bump_rc=1)
+* --------------------------------------------------------------------------
+.param C_pad_chip_fF=276.245
+.param R_pad_chip_ohm=0.005313
+.param C_esd_fF=27.000
+.param C_bump_fF=3.736
+.param R_bump_ohm=0.005720
+.param C_tr_near_fF=925.000
+.param R_tr1_ohm=10.4000
+.param C_tr1_fF=1850.000
+.param R_tr2_ohm=10.4000
+.param C_tr2_fF=1850.000
+.param R_tr3_ohm=10.4000
+.param C_tr_far_fF=925.000
+.param R_pad_ipos_ohm=0.005313
+.param C_pad_ipos_fF=220.996
+.param R_pad_ipos_tx_ohm=0.005313
+.param C_pad_ipos_tx_fF=220.996
+.param C_rx_bump_fF=3.736
+.param R_rx_bump_ohm=0.005720
+.param C_rx_pad_chip_fF=276.245
+.param R_rx_pad_chip_ohm=0.005313
+.param C_rx_esd_fF=27.000
+
+* --------------------------------------------------------------------------
+* Unit TX driver + EQ subcircuit
+*   The fourth port 'txpad' is the EQ output that drives the channel.
+*   Channel RC lives in the separate .subckt channel below so the wrapper
+*   can stitch per-lane unique nodes together with inter-lane Cc caps.
+* --------------------------------------------------------------------------
+.subckt tx in VDD VSS txpad
+* Inverter stage 1
+xnm1 out1 in   VSS VSS nmos_vtg w=0.4u  l=0.05u
+xpm1 out1 in   VDD VDD pmos_vtg w=0.6u  l=0.05u
+* Inverter stage 2
+xnm2 out2 out1 VSS VSS nmos_vtg w=1.6u  l=0.05u
+xpm2 out2 out1 VDD VDD pmos_vtg w=2.4u  l=0.05u
+* Inverter stage 3
+xnm3 out3 out2 VSS VSS nmos_vtg w=6.4u  l=0.05u
+xpm3 out3 out2 VDD VDD pmos_vtg w=9.6u  l=0.05u
+* Inverter stage 4
+xnm4 eq_node out3 VSS VSS nmos_vtg w=25.6u l=0.05u
+xpm4 eq_node out3 VDD VDD pmos_vtg w=38.4u l=0.05u
+* Equalization network (optional: Req in series, Ceq shunt for pre-emphasis)
+Req eq_node txpad 'equalization==1 ? 1000  : 0.001'
+Ceq txpad   VSS   'equalization==1 ? 575f  : 1e-30'
+.ends tx
+
+* --------------------------------------------------------------------------
+* Per-lane channel RC Pi-ladder subcircuit
+*   Every internal node (txpad, n_bump, n_ipad_tx, n_tr0..3, n_rxbump,
+*   n_rxpad, PAD) is exposed as a port so that the txip wrapper can add
+*   coupling caps to the matching node of the neighbouring lane.
+*
+* When channel_rc=0 : all RC elements collapse to ~0 (1e-30 F / 1 mOhm),
+*                     effectively shorting txpad straight to PAD.
+* When channel_rc=1 : full Pi-ladder is active.
+* When rx_pad_bump_rc=0 : RX bump/pad/ESD are bypassed (n_rxbump -> PAD).
+* --------------------------------------------------------------------------
+.subckt channel txpad n_bump n_ipad_tx n_tr0 n_tr1 n_tr2 n_tr3 n_rxbump n_rxpad PAD VSS
+* TX chiplet pad shunt caps (at txpad, before any series R)
+C_pad_chip txpad  VSS 'channel_rc==1 ? C_pad_chip_fF*1e-15 : 1e-30'
+C_esd      txpad  VSS 'channel_rc==1 ? C_esd_fF*1e-15      : 1e-30'
+* TX pad series resistance
+R_pad_chip txpad  n_bump 'channel_rc==1 ? R_pad_chip_ohm : 0.001'
+* Microbump
+C_bump     n_bump    VSS       'channel_rc==1 ? C_bump_fF*1e-15 : 1e-30'
+R_bump     n_bump    n_ipad_tx 'channel_rc==1 ? R_bump_ohm      : 0.001'
+* TX interposer pad
+C_pad_ipos_tx  n_ipad_tx  VSS    'channel_rc==1 ? C_pad_ipos_tx_fF*1e-15 : 1e-30'
+R_pad_ipos_tx  n_ipad_tx  n_tr0  'channel_rc==1 ? R_pad_ipos_tx_ohm : 0.001'
+* Trace Pi-ladder: near half-cell
+C_tr_near  n_tr0  VSS    'channel_rc==1 ? C_tr_near_fF*1e-15 : 1e-30'
+* Trace Pi-ladder: segment 1
+R_tr1      n_tr0  n_tr1  'channel_rc==1 ? R_tr1_ohm : 0.001'
+C_tr1      n_tr1  VSS    'channel_rc==1 ? C_tr1_fF*1e-15 : 1e-30'
+* Trace Pi-ladder: segment 2
+R_tr2      n_tr1  n_tr2  'channel_rc==1 ? R_tr2_ohm : 0.001'
+C_tr2      n_tr2  VSS    'channel_rc==1 ? C_tr2_fF*1e-15 : 1e-30'
+* Trace Pi-ladder: segment 3
+R_tr3      n_tr2  n_tr3  'channel_rc==1 ? R_tr3_ohm : 0.001'
+* Trace Pi-ladder: far half-cell
+C_tr_far   n_tr3  VSS    'channel_rc==1 ? C_tr_far_fF*1e-15 : 1e-30'
+* RX interposer pad
+R_pad_ipos n_tr3     n_rxbump 'channel_rc==1 ? R_pad_ipos_ohm : 0.001'
+C_pad_ipos n_rxbump  VSS      'channel_rc==1 ? C_pad_ipos_fF*1e-15 : 1e-30'
+* RX microbump (controlled by rx_pad_bump_rc flag)
+C_rx_bump  n_rxbump  VSS      '(channel_rc==1)&&(rx_pad_bump_rc==1) ? C_rx_bump_fF*1e-15 : 1e-30'
+R_rx_bump  n_rxbump  n_rxpad  '(channel_rc==1)&&(rx_pad_bump_rc==1) ? R_rx_bump_ohm : 0.001'
+* RX chiplet pad
+C_rx_pad   n_rxpad   VSS      '(channel_rc==1)&&(rx_pad_bump_rc==1) ? C_rx_pad_chip_fF*1e-15 : 1e-30'
+R_rx_pad   n_rxpad   PAD      '(channel_rc==1)&&(rx_pad_bump_rc==1) ? R_rx_pad_chip_ohm : 0.001'
+* RX ESD clamp (at RX chip PAD pin, when rx_pad_bump_rc=1)
+C_rx_esd   PAD       VSS      '(channel_rc==1)&&(rx_pad_bump_rc==1) ? C_rx_esd_fF*1e-15 : 1e-30'
+* When rx_pad_bump_rc=0 short n_rxbump directly to PAD
+R_rx_bypass PAD     n_rxbump  '(channel_rc==1)&&(rx_pad_bump_rc==0) ? 0.001 : 1e9'
+.ends channel
+
+* --------------------------------------------------------------------------
+* Multi-lane TX wrapper (16 lanes) — standalone-runnable.
+*   In the full pipeline tx.py regenerates this wrapper for the configured
+*   lane_count and stitches inter-lane coupling caps; here it is emitted
+*   in full so the template characterizes on its own via ./run.sh.
+* --------------------------------------------------------------------------
+.subckt txip \
+    IN_0  IN_1  IN_2  IN_3 \
+    IN_4  IN_5  IN_6  IN_7 \
+    IN_8  IN_9  IN_10  IN_11 \
+    IN_12  IN_13  IN_14  IN_15 \
+    VDD VSS \
+    PAD_0  PAD_1  PAD_2  PAD_3 \
+    PAD_4  PAD_5  PAD_6  PAD_7 \
+    PAD_8  PAD_9  PAD_10  PAD_11 \
+    PAD_12  PAD_13  PAD_14  PAD_15
+
+* ---- TX drivers (driver + EQ, one per lane) ----
+xtx0  IN_0  VDD VSS  v0_txpad  tx
+xtx1  IN_1  VDD VSS  v1_txpad  tx
+xtx2  IN_2  VDD VSS  v2_txpad  tx
+xtx3  IN_3  VDD VSS  v3_txpad  tx
+xtx4  IN_4  VDD VSS  v4_txpad  tx
+xtx5  IN_5  VDD VSS  v5_txpad  tx
+xtx6  IN_6  VDD VSS  v6_txpad  tx
+xtx7  IN_7  VDD VSS  v7_txpad  tx
+xtx8  IN_8  VDD VSS  v8_txpad  tx
+xtx9  IN_9  VDD VSS  v9_txpad  tx
+xtx10  IN_10  VDD VSS  v10_txpad  tx
+xtx11  IN_11  VDD VSS  v11_txpad  tx
+xtx12  IN_12  VDD VSS  v12_txpad  tx
+xtx13  IN_13  VDD VSS  v13_txpad  tx
+xtx14  IN_14  VDD VSS  v14_txpad  tx
+xtx15  IN_15  VDD VSS  v15_txpad  tx
+
+* ---- Per-lane channel instances ----
+xch0  v0_txpad  v0_bump  v0_ipad_tx  v0_tr0 v0_tr1 v0_tr2 v0_tr3  v0_rxbump v0_rxpad  PAD_0  VSS  channel
+xch1  v1_txpad  v1_bump  v1_ipad_tx  v1_tr0 v1_tr1 v1_tr2 v1_tr3  v1_rxbump v1_rxpad  PAD_1  VSS  channel
+xch2  v2_txpad  v2_bump  v2_ipad_tx  v2_tr0 v2_tr1 v2_tr2 v2_tr3  v2_rxbump v2_rxpad  PAD_2  VSS  channel
+xch3  v3_txpad  v3_bump  v3_ipad_tx  v3_tr0 v3_tr1 v3_tr2 v3_tr3  v3_rxbump v3_rxpad  PAD_3  VSS  channel
+xch4  v4_txpad  v4_bump  v4_ipad_tx  v4_tr0 v4_tr1 v4_tr2 v4_tr3  v4_rxbump v4_rxpad  PAD_4  VSS  channel
+xch5  v5_txpad  v5_bump  v5_ipad_tx  v5_tr0 v5_tr1 v5_tr2 v5_tr3  v5_rxbump v5_rxpad  PAD_5  VSS  channel
+xch6  v6_txpad  v6_bump  v6_ipad_tx  v6_tr0 v6_tr1 v6_tr2 v6_tr3  v6_rxbump v6_rxpad  PAD_6  VSS  channel
+xch7  v7_txpad  v7_bump  v7_ipad_tx  v7_tr0 v7_tr1 v7_tr2 v7_tr3  v7_rxbump v7_rxpad  PAD_7  VSS  channel
+xch8  v8_txpad  v8_bump  v8_ipad_tx  v8_tr0 v8_tr1 v8_tr2 v8_tr3  v8_rxbump v8_rxpad  PAD_8  VSS  channel
+xch9  v9_txpad  v9_bump  v9_ipad_tx  v9_tr0 v9_tr1 v9_tr2 v9_tr3  v9_rxbump v9_rxpad  PAD_9  VSS  channel
+xch10  v10_txpad  v10_bump  v10_ipad_tx  v10_tr0 v10_tr1 v10_tr2 v10_tr3  v10_rxbump v10_rxpad  PAD_10  VSS  channel
+xch11  v11_txpad  v11_bump  v11_ipad_tx  v11_tr0 v11_tr1 v11_tr2 v11_tr3  v11_rxbump v11_rxpad  PAD_11  VSS  channel
+xch12  v12_txpad  v12_bump  v12_ipad_tx  v12_tr0 v12_tr1 v12_tr2 v12_tr3  v12_rxbump v12_rxpad  PAD_12  VSS  channel
+xch13  v13_txpad  v13_bump  v13_ipad_tx  v13_tr0 v13_tr1 v13_tr2 v13_tr3  v13_rxbump v13_rxpad  PAD_13  VSS  channel
+xch14  v14_txpad  v14_bump  v14_ipad_tx  v14_tr0 v14_tr1 v14_tr2 v14_tr3  v14_rxbump v14_rxpad  PAD_14  VSS  channel
+xch15  v15_txpad  v15_bump  v15_ipad_tx  v15_tr0 v15_tr1 v15_tr2 v15_tr3  v15_rxbump v15_rxpad  PAD_15  VSS  channel
+
+* --------------------------------------------------------------------------
+* Inter-lane coupling capacitance (DISABLED in standalone template;
+*   the Python pipeline stitches Cc caps per the bump map at runtime)
+* --------------------------------------------------------------------------
+
+.ends txip

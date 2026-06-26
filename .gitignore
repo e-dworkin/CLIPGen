@@ -1,0 +1,21 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Run outputs (results/<timestamp>_.../) and tool logs
+results/
+*.log
+
+# Virtual environments
+.venv/
+venv/
+.env
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Claude Code local state
+.claude/

@@ -1,0 +1,56 @@
+# UCIe Advanced Package — 16-Column x64 Bump Map (16 GT/s Implementation)
+# Source: UCIe Specification Revision 2.0, Figure 5-25
+#
+# Recommended bump pitch: 25–30 um (12 GT/s), 31–37 um (16 GT/s)
+# Module depth at 25 um pitch: ~400 um
+# Note: Rows 1 and 31 required for packaging solutions using floating bridges
+#       without TSVs; optional for packaging solutions with TSVs.
+#
+# Grid : 31 rows x 16 columns = 496 bumps total
+# Counts:
+#   tx    : 64  (txdata0-63, txdataRD0)
+#   rx    : 64  (rxdata0-63, rxdataRD0)
+#   vdd   : 48  (VCCIO / VCCFWDIO)
+#   vss   : 176 (VSS)
+#   other : 16  (sideband: txdatasBRD, rxdatasBRD, txcksb, rxcksb,
+#                Txckp, Txckn, Rxckp, Rxckn, Txvld, Txtrk, Rxvld, Rxtrk,
+#                txckRD, rxckRD, txck, rxck)
+#   empty : 128
+#
+# Row 0 is farthest from die edge; Row 30 is at die edge.
+# Left half (col 0-7): TX data;  Right half (col 8-15): RX data.
+# Even data rows carry 8 tx + 8 rx (dense packing, no alternating).
+#
+#         Col0  Col1  Col2  Col3  Col4  Col5  Col6  Col7  Col8  Col9  C10   C11   C12   C13   C14   C15
+#         --------------------------------------------------------------------------------------------
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R00: VSS (packaging bridge row)
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R01: VCCIO (packaging bridge row)
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R02: VSS
+other  other  other  other  vss  vss  other  other  other  other  other  other  vss  vss  other  other  # R03: sideband/clock signals
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R04: Txdata0-7 | Rxdata0-7
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R05: VSS
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R06: Txdata8-15 | Rxdata8-15
+vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss   # R07: VCCIO/VSS
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R08: Txdata16-23 | Rxdata16-23
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R09: VSS
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R10: Txdata24-31 | Rxdata24-31
+vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss   # R11: VCCIO/VSS
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R12: Txdata32-39 | Rxdata32-39
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R13: VSS
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R14: Txdata40-47 | Rxdata40-47
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R15: VCCFWDIO (mid rail)
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R16: Txdata48-55 | Rxdata48-55
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R17: VSS
+tx  tx  tx  tx  tx  tx  tx  tx  rx  rx  rx  rx  rx  rx  rx  rx                   # R18: Txdata56-63 | Rxdata56-63
+vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss   # R19: VCCIO/VSS
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R20: VSS
+vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss   # R21: VCCIO/VSS
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R22: VSS
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R23: VCCIO
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R24: VSS
+vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss   # R25: VCCIO/VSS
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R26: VSS
+vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss  vdd  vdd  vss  vss   # R27: VCCIO/VSS
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R28: VSS
+vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd  vdd   # R29: VCCIO
+vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss  vss   # R30 (die edge): VSS (packaging bridge row)

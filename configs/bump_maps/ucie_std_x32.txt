@@ -1,0 +1,33 @@
+# UCIe Standard Package — x32 Interface Bump Map
+# Source: UCIe 1.0 Specification, Figure 5-42
+#
+# Layout: Two x16 modules (m1, m2) placed side by side.
+# Grid : 14 rows x 24 columns = 336 bumps total
+# Counts:
+#   tx    : 32  (m1Txdata0-15, m2Txdata0-15)
+#   rx    : 32  (m1Rxdata0-15, m2Rxdata0-15)
+#   vdd   : 36  (VCCIO)
+#   vss   : 48  (VSS)
+#   other : 24  (m1/m2: txdatasb, txcksb, rxdatasb, rxcksb,
+#                Txckn, Txckp, Rxckn, Rxckp, Txvld, Txtrk, Rxvld, Rxtrk)
+#   empty : 160
+#
+# Row 0 is farthest from die edge; Row 13 is at die edge.
+# Columns 0-11: Module 1 (m1); Columns 12-23: Module 2 (m2)
+#
+#         Col0  Col1  Col2  Col3  Col4  Col5  Col6  Col7  Col8  Col9 C10  C11   C12  C13  C14  C15  C16  C17  C18  C19  C20  C21  C22  C23
+#         -----------------------------------------------------------------------------------------------------------------------------------
+other  -   other  -   -   vdd  vdd   -   -   other  -   other   other  -   other  -   -   vdd  vdd   -   -   other  -   other   # R00: m1/m2 txdatasb txcksb vccaon vccaon rxcksb rxdatasb
+-   vdd  -   vdd  -   vdd  -   vdd  -   vdd  -   vdd   -   vdd  -   vdd  -   vdd  -   vdd  -   vdd  -   vdd                   # R01: VCCIO × 12
+vss  -   vss  -   vss  -   vss  -   vss  -   vss  -   vss  -   vss  -   vss  -   vss  -   vss  -   vss  -                    # R02: VSS × 12
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -   -   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -                             # R03: m1 Txdata0-3, Rxdata0-3; m2 Txdata0-3, Rxdata0-3
+vss  -   other  -   vss  -   vss  -   other  -   vss  -   vss  -   other  -   vss  -   vss  -   other  -   vss  -             # R04: Txckn/Rxckp per module
+-   vss  -   vss  -   vss  -   vss  -   vss  -   vss   -   vss  -   vss  -   vss  -   vss  -   vss  -   vss                  # R05: VSS × 12
+vdd  -   other  -   vdd  -   vdd  -   other  -   vdd   vdd  -   other  -   vdd  -   vdd  -   other  -   vdd  -               # R06: Txckp/Rxckn per module
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -   -   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -                             # R07: m1 Txdata4-7, Rxdata4-7; m2 Txdata4-7, Rxdata4-7
+vdd  -   vss  -   vdd  -   vdd  -   vss  -   vdd   vdd  -   vss  -   vdd  -   vdd  -   vss  -   vdd  -                      # R08: VCCIO/VSS per module
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -   -   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -                             # R09: m1 Txdata8-11, Rxdata8-11; m2 Txdata8-11, Rxdata8-11
+vdd  -   other  -   vdd  -   vdd  -   other  -   vdd   vdd  -   other  -   vdd  -   vdd  -   other  -   vdd  -              # R10: Txvld/Rxtrk per module
+-   vss  -   vss  -   vss  -   vss  -   vss  -   vss   -   vss  -   vss  -   vss  -   vss  -   vss  -   vss                  # R11: VSS × 12
+vss  -   other  -   vss  -   vss  -   other  -   vss   vss  -   other  -   vss  -   vss  -   other  -   vss  -              # R12: Txtrk/Rxvld per module
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -   -   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -                             # R13 (die edge): m1 Txdata12-15, Rxdata12-15; m2 Txdata12-15, Rxdata12-15

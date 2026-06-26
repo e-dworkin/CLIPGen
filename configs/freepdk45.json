@@ -1,0 +1,185 @@
+{
+  "process": {
+    "node": "freepdk45",
+    "lib_corner": "nom",
+    "model_include_format": "hspice_ptm",
+    "vdd": 1.1,
+    "temp": 25
+  },
+  "transistor": {
+    "nmos_name": "nmos_vtg",
+    "pmos_name": "pmos_vtg",
+    "l_um": 0.05,
+    "nf": 1,
+    "w_min_um": 0.1,
+    "w_max_um": 900.0,
+    "style": "subckt_wl",
+    "include_nf": true
+  },
+  "liberate": {
+    "template_dir": "../templates/freepdk45_liberate_template"
+  },
+  "clocking_hidden": {
+    "serializer_fj_per_stage": 2.44,
+    "deserializer_fj_per_stage": 2.44,
+    "dcc_power_uW": 182.0,
+    "dll_power_uW": 182.0,
+    "pi_power_uW_per_lane": 182.0,
+    "fck_cap_GHz": 8.0,
+    "deskew_required_min_GTs": 12.0
+  },
+  "tx_hidden": {
+    "w_n_um": 0.4,
+    "w_p_um": 0.6,
+    "tx_sizing_enabled": false,
+    "rise_fall_pct_ui": 0.35,
+    "max_iterations": 20
+  },
+  "rx_hidden": {
+    "w_preamp_n_um": 0.4,
+    "w_preamp_p_um": 0.6,
+    "w_buf_n_um": 1.2,
+    "w_buf_p_um": 1.8,
+    "input_slews_ns_override": null,
+    "rx_slew_source": "channel",
+    "rx_sizing_enabled": false,
+    "max_rx_delay_ui_fraction": 0.1
+  },
+  "channel_hidden": {
+    "bump_diameter_um": null,
+    "bump_height_um": null,
+    "trace_width_um": null,
+    "esd_type": null,
+    "coupling_cap": {
+      "cc_ratio_trace": 0.4,
+      "cc_ratio_pad": 0.2,
+      "cc_rx_pad_fF": 1.0
+    },
+    "eps_sio2": 3.9,
+    "eps_fr4": 4.7,
+    "eps_polyimide": 3.5,
+    "tox_chiplet_um": 0.8,
+    "tox_silicon_interposer_um": 1.0,
+    "tox_organic_substrate_um": 20.0,
+    "r_pad_ref_ohm": 0.017,
+    "r_pad_ref_width_um": 25.0,
+    "bump_resistivity_ohm_um": 0.0168,
+    "bump_relative_permeability": 1.0,
+    "trace_silicon": {
+      "c_per_mm_fF": 185.0,
+      "r_per_mm_ohm": 1.04,
+      "default_width_um": 3.0,
+      "default_eps_r": 3.9
+    },
+    "trace_organic": {
+      "c_per_mm_fF": 138.0,
+      "r_per_mm_ohm": 0.036,
+      "default_width_um": 30.0,
+      "default_eps_r": 3.7
+    },
+    "esd_silicon_fine_pitch_fF": 1.6,
+    "esd_fine_pitch_threshold_um": 10.0,
+    "esd_silicon_interposer_fF": 27.0,
+    "esd_organic_fF": 225.0,
+    "esd_levels": [
+      [5.0, 0.33, "minimal"],
+      [20.0, 0.67, "moderate"],
+      [0, 1.0, "standard"]
+    ],
+    "ucie_pad_cap_table": [
+      [8, 300.0],
+      [16, 200.0],
+      [32, 125.0],
+      [0, 125.0]
+    ]
+  },
+  "equalization_hidden": {
+    "loss_threshold_dB": 3.0,
+    "eq_cap_fraction": 0.1,
+    "eq_levels": [
+      [1.0, 0.0, "none"],
+      [2.0, 0.05, "light"],
+      [3.0, 0.1, "moderate"],
+      [5.0, 0.15, "strong"],
+      [0, 0.2, "aggressive"]
+    ]
+  },
+  "termination_hidden": {
+    "ac_coupled": false,
+    "r_tx_ohm": 50.0,
+    "r_rx_ohm": 50.0,
+    "r_bias_hi_ohm": 1000000.0,
+    "r_bias_lo_ohm": 1000000.0,
+    "termination_improvement_factor": 1.75,
+    "unterminated_limits": {
+      "0.4": [
+        [12.0, 0.0],
+        [12.0, 3.0],
+        [8.0, 5.0],
+        [4.0, 10.0],
+        [4.0, 25.0],
+        [0.0, 25.0]
+      ],
+      "0.5": [
+        [13.0, 0.0],
+        [13.0, 3.5],
+        [9.0, 6.0],
+        [5.0, 12.0],
+        [5.0, 30.0],
+        [0.0, 30.0]
+      ],
+      "0.6": [
+        [14.0, 0.0],
+        [14.0, 4.0],
+        [10.0, 7.0],
+        [6.0, 15.0],
+        [6.0, 35.0],
+        [0.0, 35.0]
+      ],
+      "0.7": [
+        [15.0, 0.0],
+        [15.0, 4.5],
+        [11.0, 8.0],
+        [7.0, 20.0],
+        [7.0, 40.0],
+        [0.0, 40.0]
+      ],
+      "0.85": [
+        [16.0, 0.0],
+        [16.0, 5.0],
+        [12.0, 10.0],
+        [8.0, 25.0],
+        [8.0, 50.0],
+        [0.0, 50.0]
+      ],
+      "1.0": [
+        [18.0, 0.0],
+        [18.0, 6.0],
+        [14.0, 12.0],
+        [10.0, 30.0],
+        [10.0, 60.0],
+        [0.0, 60.0]
+      ]
+    },
+    "term_levels": [
+      [1.0, 0.0, 0.0, "none"],
+      [1.25, 2.0, 0.5, "light"],
+      [1.5, 1.0, 1.0, "standard"],
+      [0, 0.5, 2.0, "strong"]
+    ]
+  },
+  "area_hidden": {
+    "cap_mim_fF_per_um2": null,
+    "res_poly_ohm_per_sq": null,
+    "res_min_width_um": null,
+    "res_bias_ohm_per_sq": null,
+    "esd_diode_fF_per_um2": null,
+    "pad_cap_fF_per_um2": null,
+    "metal_spacing_um": null,
+    "metal_track_um": null,
+    "nwell_pwell_gap_um": null,
+    "active_margin_frac": null,
+    "pad_access_overhead_um": null,
+    "lane_width_frac": null
+  }
+}

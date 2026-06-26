@@ -1,0 +1,73 @@
+{
+  "pdk": "./configs/freepdk45.json",
+  "process": {
+    "lib_path": "/Path/to/FreePDK45/ncsu_basekit/models/hspice/tran_models/"
+  },
+  "link": {
+    "pkg_type": "silicon",
+    "reach_mm": 20,
+    "bump_pitch_um": 100,
+    "data_rate_Gbps": 16,
+    "lane_count": 8
+  },
+  "clocking": {
+    "enabled": true,
+    "n_clocks": 1,
+    "ratio": "ucie",
+    "deskew": "ucie"
+  },
+  "channel": {
+    "bump_diameter_scale": 0.64,
+    "esd_mode": "auto",
+    "pad_cap_mode": "physical",
+    "coupling_cap": {
+      "enabled": true
+    }
+  },
+  "equalization": {
+    "enabled": "auto"
+  },
+  "termination": {
+    "enabled": "auto"
+  },
+  "layout": {
+    "bump_map_enabled": true,
+    "bump_map_file": "bump_maps/ucie_std_x8.txt"
+  },
+  "output": {
+    "base_dir": "results",
+    "save_netlists": true,
+    "save_liberate_decks": true,
+    "save_lib": true,
+    "save_metrics_csv": true,
+    "generate_verilog": true,
+    "generate_lef": true
+  },
+  "sweep": {
+    "enabled": false,
+    "pkg_type": ["silicon", "organic"],
+    "reach_mm": [1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 60, 70, 80],
+    "bump_pitch_um": [1, 5, 10, 20, 50, 100],
+    "data_rate_Gbps": [1, 2, 4, 8, 16, 20, 24, 32]
+  },
+  "co_opt": {
+    "enabled": true,
+    "rise_fall_pct_ui": 0.35,
+    "max_latency_ui": "auto",
+    "n_tx_configs": 16,
+    "n_rx_configs": 16,
+    "n_tx_load_points": 8,
+    "n_rx_slew_points": 8,
+    "max_parallel": 32,
+    "pareto_selection": "all"
+  },
+  "liberate": {
+    "slew_lower_rise": 0.2,
+    "slew_upper_rise": 0.8,
+    "slew_lower_fall": 0.2,
+    "slew_upper_fall": 0.8,
+    "input_slews_ns": [0.25, 0.75, 1.5],
+    "output_loads_pF": [0.0005, 0.001, 0.002, 0.004, 0.016, 0.064],
+    "tx_include_channel_rc": true
+  }
+}

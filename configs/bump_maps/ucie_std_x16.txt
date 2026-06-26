@@ -1,0 +1,34 @@
+# UCIe Standard Package — x16 Interface Bump Map
+# Source: UCIe 1.0 Specification, Figure 5-40
+#
+# Grid : 14 rows x 12 columns = 168 bumps total
+# Counts:
+#   tx    : 16  (Txdata0-15)
+#   rx    : 16  (Rxdata0-15)
+#   vdd   : 18  (VCCIO)
+#   vss   : 24  (VSS)
+#   other : 12  (txdatasb, txcksb, rxdatasb, rxcksb,
+#                Txckn, Txckp, Rxckn, Rxckp,
+#                Txvld, Txtrk, Rxvld, Rxtrk)
+#   empty : 82
+#
+# Row 0 is farthest from die edge; Row 13 is at die edge.
+# TX lanes occupy columns 1-4; RX lanes occupy columns 7-10.
+# Each data row carries 4 TX + 4 RX lanes (16 total over 4 data rows).
+#
+#           Col0   Col1   Col2   Col3   Col4   Col5   Col6   Col7   Col8   Col9  Col10  Col11
+#          -----------------------------------------------------------------------------------
+other  -   other  -   -   vdd  vdd   -   -   other  -   other  # R00: txdatasb . txcksb . . VCCIO VCCIO . . rxcksb . rxdatasb
+-   vdd  -   vdd  -   vdd  -   vdd  -   vdd  -   vdd          # R01: . VCCIO . VCCIO . VCCIO . VCCIO . VCCIO . VCCIO
+vss  -   vss  -   vss  -   vss  -   vss  -   vss  -           # R02: VSS . VSS . VSS . VSS . VSS . VSS .
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -               # R03: . Txdata0 Txdata15 Txdata14 Txdata13 . . Rxdata12 Rxdata1 Rxdata2 Rxdata3 .
+vss  -   other  -   vss  -   vss  -   other  -   vss  -       # R04: VSS . Txckn . VSS . VSS . Rxckp . VSS .
+-   vss  -   vss  -   vss  -   vss  -   vss  -   vss          # R05: . VSS . VSS . VSS . VSS . VSS . VSS
+vdd  -   other  -   vdd  -   vdd  -   other  -   vdd  -       # R06: VCCIO . Txckp . VCCIO . VCCIO . Rxckn . VCCIO .
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -               # R07: . Txdata1 Txdata2 Txdata3 Txdata4 . . Rxdata11 Rxdata4 Rxdata5 Rxdata6 .
+vdd  -   vss  -   vdd  -   vdd  -   vss  -   vdd  -          # R08: VCCIO . VSS . VCCIO . VCCIO . VSS . VCCIO .
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -               # R09: . Txdata5 Txdata6 Txdata7 Txdata8 . . Rxdata10 Rxdata7 Rxdata8 Rxdata9 .
+vdd  -   other  -   vdd  -   vdd  -   other  -   vdd  -      # R10: VCCIO . Txvld . VCCIO . VCCIO . Rxtrk . VCCIO .
+-   vss  -   vss  -   vss  -   vss  -   vss  -   vss          # R11: . VSS . VSS . VSS . VSS . VSS . VSS
+vss  -   other  -   vss  -   vss  -   other  -   vss  -      # R12: VSS . Txtrk . VSS . VSS . Rxvld . VSS .
+-   tx  tx  tx  tx   -   -   rx  rx  rx  rx   -               # R13 (die edge): . Txdata9 Txdata10 Txdata11 Txdata12 . . Rxdata13 Rxdata14 Rxdata15 Rxdata0 .
