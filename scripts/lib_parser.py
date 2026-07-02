@@ -106,7 +106,7 @@ def parse_lib_timing(lib_path: str, cell_name: Optional[str] = None) -> Dict:
     # balanced-brace matching.  A simple non-greedy regex stops at the first
     # inner nested '}' (e.g. the close of 'cell_rise'), truncating the block
     # before 'rise_transition' / 'fall_transition' are reached.
-    timing_groups = _extract_balanced_blocks(content, r'timing\s*\(\)')
+    timing_groups = _extract_balanced_blocks(content, r'timing\s*\([^)]*\)')
 
     for group_name in ("cell_rise", "cell_fall", "rise_transition", "fall_transition"):
         all_values = []
@@ -122,7 +122,7 @@ def parse_lib_timing(lib_path: str, cell_name: Optional[str] = None) -> Dict:
             values = _parse_values_block(block)
 
             # Extract related_pin from timing group
-            rp_match = re.search(r'related_pin\s*:\s*"([^"]*)"', tg)
+            rp_match = re.search(r'related_pin\s*:\s*"?([^"\s;]+)"?', tg)
             related_pin = rp_match.group(1) if rp_match else ""
 
             result[group_name].append({
@@ -207,7 +207,7 @@ def parse_lib_power(lib_path: str, pg_pin: str = "VDD") -> Dict:
     result: Dict[str, list] = {"rise_power": [], "fall_power": []}
 
     # Find all internal_power () { ... } blocks
-    ip_blocks = _extract_balanced_blocks(content, r'internal_power\s*\(\)')
+    ip_blocks = _extract_balanced_blocks(content, r'internal_power\s*\([^)]*\)')
 
     for ip in ip_blocks:
         # Filter by related_pg_pin
@@ -215,7 +215,7 @@ def parse_lib_power(lib_path: str, pg_pin: str = "VDD") -> Dict:
         if pg_match and pg_match.group(1) != pg_pin:
             continue
 
-        rp_match = re.search(r'related_pin\s*:\s*"([^"]*)"', ip)
+        rp_match = re.search(r'related_pin\s*:\s*"?([^"\s;]+)"?', ip)
         related_pin = rp_match.group(1) if rp_match else ""
 
         for group_name in ("rise_power", "fall_power"):
