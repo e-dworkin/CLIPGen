@@ -19,3 +19,11 @@ venv/
 
 # Claude Code local state
 .claude/
+
+# NDA foundry PDKs (FreePDK45 stays; add new nodes as needed)
+*tsmc*
+*TSMC*
+*gf12*
+*gf14*
+*gf45*
+*globalfoundries*
