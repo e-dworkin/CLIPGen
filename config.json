@@ -61,6 +61,7 @@
     "max_parallel": 32,
     "pareto_selection": "all"
   },
+  "backend": "liberate",
   "liberate": {
     "slew_lower_rise": 0.2,
     "slew_upper_rise": 0.8,
@@ -69,5 +70,12 @@
     "input_slews_ns": [0.25, 0.75, 1.5],
     "output_loads_pF": [0.0005, 0.001, 0.002, 0.004, 0.016, 0.064],
     "tx_include_channel_rc": true
+  },
+  "charlib": {
+    "charlib_executable": "/Path/to/charlib",
+    "ngspice_executable": "/Path/to/ngspice",
+    "ngspice_library_path": "/Path/to/libngspice.so",
+    "input_slews_ns": [0.010938, 0.021875, 0.043750],
+    "output_loads_pF": [0.0005, 0.001, 0.002, 0.004, 0.016, 0.064]
   }
 }
