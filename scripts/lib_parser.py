@@ -292,3 +292,52 @@ def parse_pin_capacitance(lib_path: str, pin_pattern: Optional[str] = None) -> D
             caps[pin_name] = float(cap_match.group(1))
 
     return caps
+
+
+# ---------------------------------------------------------------------------
+# Leakage power extraction
+# ---------------------------------------------------------------------------
+
+def parse_cell_leakage_power(lib_path: str, cell_name: Optional[str] = None) -> float:
+    """
+    Parse leakage_power blocks from a Liberty .lib file. Not needed for Liberate since
+    leakage results are gleaned from the DATASHEET.txt. This function is needed for
+    CharLib since it reports leakage power only through the .lib output.
+
+    Parameters
+    ----------
+    lib_path : str
+        Path to the .lib file.
+    cell_name : str, optional
+        If given, only parse leakage_power blocks inside the named cell block.
+        If None, parse all leakage_power blocks in the file.
+
+    Returns
+    -------
+    float
+        Average of all ``value : <float>`` entries found (in nW, library unit).
+        Returns 0.0 if no leakage_power blocks are found.
+    """
+    with open(lib_path, "r") as f:
+        content = f.read()
+
+    if cell_name is not None:
+        # Find the matching cell block
+        cell_blocks = _extract_balanced_blocks(content, rf'cell\s*\(\s*{re.escape(cell_name)}\s*\)')
+        if not cell_blocks:
+            return 0.0
+        search_text = cell_blocks[0]
+    else:
+        search_text = content
+
+    lp_blocks = _extract_balanced_blocks(search_text, r'leakage_power\s*\([^)]*\)')
+    values = []
+    for block in lp_blocks:
+        m = re.search(r'\bvalue\s*:\s*([\d.eE+\-]+)', block)
+        if m:
+            try:
+                values.append(float(m.group(1)))
+            except ValueError:
+                pass
+
+    return sum(values) / len(values) if values else 0.0
