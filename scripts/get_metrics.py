@@ -359,6 +359,53 @@ def _parse_lib_transitions(lib_path: str, prefix: str, warnings: list) -> dict:
     return result
 
 
+def _extract_from_lib_charlib(lib_path: str, prefix: str, warnings: list) -> dict:
+    """
+    Extract all metrics from a CharLib Liberty .lib file.
+
+    prefix : "tx" or "rx" — used as the key prefix.
+    Returns a dict with the same keys as _parse_tx_datasheet / _parse_rx_datasheet.
+    All metrics come from the .lib; there is no DATASHEET for CharLib runs.
+    """
+    result = {}
+    if not os.path.exists(lib_path):
+        warnings.append(f"{prefix.upper()}: .lib file not found: {lib_path}")
+        return result
+
+    try:
+        timing = lib_parser.parse_lib_timing(lib_path)
+        result[f"{prefix}_delay_rr_avg_ns"] = timing.get("avg_cell_rise_ns",        0.0)
+        result[f"{prefix}_delay_ff_avg_ns"] = timing.get("avg_cell_fall_ns",        0.0)
+        result[f"{prefix}_slew_rr_avg_ns"]  = timing.get("avg_rise_transition_ns",  0.0)
+        result[f"{prefix}_slew_ff_avg_ns"]  = timing.get("avg_fall_transition_ns",  0.0)
+    except Exception as e:
+        warnings.append(f"{prefix.upper()}: failed to parse .lib timing: {e}")
+
+    try:
+        power = lib_parser.parse_lib_power(lib_path)
+        rise_vals = [v for arc in power.get("rise_power", [])
+                     for row in arc.get("values", []) for v in row]
+        fall_vals = [v for arc in power.get("fall_power", [])
+                     for row in arc.get("values", []) for v in row]
+        if rise_vals:
+            result[f"{prefix}_sw_rise_avg_pJ"] = _avg(rise_vals)
+        else:
+            warnings.append(f"{prefix.upper()}: rise_power not found in .lib")
+        if fall_vals:
+            result[f"{prefix}_sw_fall_avg_pJ"] = _avg(fall_vals)
+        else:
+            warnings.append(f"{prefix.upper()}: fall_power not found in .lib")
+    except Exception as e:
+        warnings.append(f"{prefix.upper()}: failed to parse .lib power: {e}")
+
+    try:
+        result[f"{prefix}_leak_avg_nW"] = lib_parser.parse_cell_leakage_power(lib_path)
+    except Exception as e:
+        warnings.append(f"{prefix.upper()}: failed to parse .lib leakage: {e}")
+
+    return result
+
+
 def _parse_rx_lib_delay_min(lib_path: str, warnings: list) -> dict:
     """
     Extract RX delay at minimum input slew and minimum output load (index [0][0])
@@ -480,19 +527,23 @@ def extract(cfg, ch_result, eq_result, term_result, tx_result, run_dir: str) -> 
     warnings = []
 
     channel_rc_integrated = getattr(tx_result, 'channel_rc_integrated', False)
+    use_charlib = getattr(tx_result, 'backend', 'liberate') == "charlib"
 
     tx_ds_path = os.path.join(run_dir, "tx", "DATASHEET", "txip.txt")
     rx_ds_path = os.path.join(run_dir, "rx", "DATASHEET", "rxip.txt")
 
-    tx = _parse_tx_datasheet(tx_ds_path, warnings)
-    rx = _parse_rx_datasheet(rx_ds_path, warnings)
-
-    # --- Fill in transition times from .lib files ---
-    # The text datasheet typically omits output transition tables. The .lib
-    # file always contains rise_transition / fall_transition data.
     tx_lib_path = os.path.join(run_dir, "tx", "LIBRARY", "txip_nldm.lib")
     rx_lib_path = os.path.join(run_dir, "rx", "LIBRARY", "rxip_nldm.lib")
 
+    if use_charlib:
+        tx = _extract_from_lib_charlib(tx_lib_path, "tx", warnings)
+        rx = _extract_from_lib_charlib(rx_lib_path, "rx", warnings)
+    else:
+        tx = _parse_tx_datasheet(tx_ds_path, warnings)
+        rx = _parse_rx_datasheet(rx_ds_path, warnings)
+
+    # --- Fill in transition times from .lib files (Liberate only; CharLib path already
+    # populated via _extract_from_lib_charlib above) ---
     if tx.get("tx_slew_rr_avg_ns", 0.0) == 0.0:
         tx_lib_trans = _parse_lib_transitions(tx_lib_path, "tx", warnings)
         tx.update(tx_lib_trans)
