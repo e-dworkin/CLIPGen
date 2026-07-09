@@ -1,0 +1,17 @@
+#!/bin/sh
+# Block NDA/proprietary foundry PDK assets from the public repo.
+# Install once per clone:  git config core.hooksPath .githooks
+
+pattern='tsmc|(^|[/_.-])gf[0-9][0-9]|globalfoundries'
+
+blocked=$(git diff --cached --name-only --diff-filter=ACMR | grep -Ei "$pattern")
+
+if [ -n "$blocked" ]; then
+    echo "pre-commit blocked: staged paths look like NDA foundry PDK assets:"
+    echo "$blocked" | sed 's/^/    /'
+    echo
+    echo "This is the PUBLIC repo. Foundry PDKs belong in CLIPGen-Private."
+    echo "False positive? Bypass with:  git commit --no-verify"
+    exit 1
+fi
+exit 0
