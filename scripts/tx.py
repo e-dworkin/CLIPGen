@@ -57,6 +57,7 @@ class TxNetlistResult:
     load_pF:              float        # external Liberate load (RX device cap when channel embedded)
     cap_in_pF:            float        # measured unit inverter input cap (pF)
     cap_in_source:        str          # "spice" or "analytical_fallback"
+    backend:              str  = "liberate"  # "liberate" or "charlib"
     channel_rc_integrated: bool = False  # True → channel RC is inside txip.scs; Liberate
                                          # TX switching power already includes channel energy
                                          # and TX delay covers full TX+channel propagation.
@@ -223,6 +224,93 @@ CL out 0 1f
                     cap_pF = float(parts[1].strip()) * 1e12
                     break
     return cap_pF
+
+
+def _measure_inv_cap_ngspice(
+    lib_path:        str,
+    lib_corner:      str,
+    w_n_um:          float,
+    w_p_um:          float,
+    l_um:            float,
+    nf:              int,
+    vdd:             float,
+    nmos_name:       str,
+    pmos_name:       str,
+    work_dir:        str,
+    ngspice_exe:     str = "ngspice",
+    temp:            float = 25,
+    spec:            Optional[DeviceSpec] = None,
+    model_include_format: str = "spice_lib",
+) -> Optional[float]:
+    """
+    Measure unit inverter input capacitance via ngspice batch simulation.
+
+    Uses the same Q/V method as _measure_inv_cap_spice().  Runs ngspice -b
+    and parses .meas results from stdout.  Returns capacitance in pF, or
+    None if the simulation fails or the result cannot be parsed.
+    """
+    cap_dir  = os.path.join(work_dir, "inverter_cap")
+    os.makedirs(cap_dir, exist_ok=True)
+    filename = "inverter_capacitance.sp"
+
+    if spec is None:
+        spec = DeviceSpec()
+
+    model_header = _gen_model_sp(lib_path, lib_corner, None,
+                                 fmt=model_include_format).rstrip()
+    # ngspice does not understand the Spectre 'simulator lang' directive
+    model_header = re.sub(r'^\s*simulator\s+lang\s*=.*$', '', model_header,
+                          flags=re.MULTILINE)
+
+    if spec.is_finfet:
+        nfin_n = spec.w_to_nfin(w_n_um)
+        nfin_p = spec.w_to_nfin(w_p_um)
+        l_nm   = spec.l_nm()
+        nmos_inst = f'xnm1 out in 0 0 {nmos_name} L={l_nm}n nfin={nfin_n}'
+        pmos_inst = f'xpm1 out in VDD VDD {pmos_name} L={l_nm}n nfin={nfin_p}'
+    else:
+        nf_tok = f' nf={nf}' if spec.include_nf else ''
+        nmos_inst = f'xnm1 out in 0 0 {nmos_name} w={w_n_um}u l={l_um}u{nf_tok}'
+        pmos_inst = f'xpm1 out in VDD VDD {pmos_name} w={w_p_um}u l={l_um}u{nf_tok}'
+
+    netlist = f"""\
+Inverter Input Capacitance Measurement - Q/V Method
+{model_header}
+.option temp={temp}
+VDD VDD 0 DC {vdd}
+VIN in_source 0 PULSE(0 {vdd} 200p 50p 50p 500p 1000p)
+VMEAS in_source in 0
+{nmos_inst}
+{pmos_inst}
+CL out 0 1f
+.tran 0.1p 1500p
+.measure tran q_rise_edge integ i(VMEAS) from=200p to=300p
+.measure tran c_in_rise param='abs(q_rise_edge)/{vdd}'
+.measure tran q_fall_edge integ i(VMEAS) from=700p to=800p
+.measure tran c_in_fall param='abs(q_fall_edge)/{vdd}'
+.measure tran c_in_avg param='(c_in_rise+c_in_fall)/2'
+.end
+"""
+
+    netlist_path = os.path.join(cap_dir, filename)
+    with open(netlist_path, "w") as f:
+        f.write(netlist)
+
+    result = subprocess.run(
+        [ngspice_exe, "-b", filename],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        cwd=cap_dir,
+    )
+    if result.returncode != 0:
+        return None
+
+    output = result.stdout.decode("utf-8", errors="replace")
+    for line in output.splitlines():
+        m = re.match(r'\s*c_in_avg\s*=\s*([\d.eE+\-]+)', line, re.IGNORECASE)
+        if m:
+            return float(m.group(1)) * 1e12
+    return None
 
 
 # ---------------------------------------------------------------------------
