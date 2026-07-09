@@ -202,6 +202,15 @@ class LiberateConfig:
 
 
 @dataclass
+class CharLibConfig:
+    charlib_executable:   str   # absolute path to the charlib binary
+    ngspice_executable:   str   # absolute path to the ngspice batch binary
+    ngspice_library_path: str   # absolute path to libngspice.so (for charlib shared backend)
+    input_slews_ns:       list
+    output_loads_pF:      list
+
+
+@dataclass
 class OutputConfig:
     base_dir: str
     save_netlists: bool
@@ -300,9 +309,9 @@ class Config:
     termination: TerminationConfig
     termination_hidden: TerminationHiddenConfig
     rx: RxConfig
-    liberate: LiberateConfig
     output: OutputConfig
     sweep: SweepConfig
+    backend: str                               # "liberate" or "charlib"; no default - must be explicit in config
     rx_sizing:   Optional[RxSizingConfig]   = None
     tx_sizing:   Optional[TxSizingConfig]   = None
     co_opt:      Optional[CoOptConfig]      = None
@@ -310,7 +319,9 @@ class Config:
     area_hidden: Optional[AreaHiddenConfig] = None
     clocking:        Optional[object] = None   # clocking.ClockingConfig
     clocking_hidden: Optional[object] = None   # clocking.ClockingHiddenConfig
-    pdk_path:        Optional[str]    = None    # resolved PDK config the entry pointed to
+    pdk_path:        Optional[str]    = None   # resolved PDK config the entry pointed to
+    liberate:    Optional[LiberateConfig]  = None  # required when backend == "liberate"
+    charlib:     Optional[CharLibConfig]   = None  # required when backend == "charlib"
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +356,14 @@ def _deep_merge(base: dict, override: dict) -> dict:
 # Path-valued keys are resolved relative to the file that DEFINES them (see
 # _load_raw), so that e.g. a PDK config's "../templates/..." stays correct even
 # when the entry point is the general root config.json.
-_PATH_KEYS = (("process", "lib_path"), ("liberate", "template_dir"), ("output", "base_dir"))
+_PATH_KEYS = (
+    ("process",  "lib_path"),
+    ("liberate", "template_dir"),
+    ("output",   "base_dir"),
+    ("charlib",  "charlib_executable"),
+    ("charlib",  "ngspice_executable"),
+    ("charlib",  "ngspice_library_path"),
+)
 
 
 def _load_raw(path: str, pdk_override: str = None, is_entry: bool = True) -> dict:
@@ -619,6 +637,26 @@ def load_config(config_path: str, pdk_config: str = None) -> Config:
             lane_width_frac        = ah_raw.get("lane_width_frac"),
         )
 
+    # Backend selection - required; no default
+    backend = raw.get("backend")
+    if backend is None:
+        raise ValueError(
+            f"{config_path} must specify \"backend\": set "
+            "\"backend\": \"liberate\" or \"backend\": \"charlib\" in config.json.")
+
+    # Liberate config - required when backend == "liberate"; may be absent/partial otherwise
+    _liberate_required = {"template_dir", "slew_lower_rise", "slew_upper_rise",
+                          "slew_lower_fall", "slew_upper_fall", "input_slews_ns", "output_loads_pF"}
+    _liberate_raw = raw.get("liberate", {})
+    if _liberate_required.issubset(_liberate_raw.keys()):
+        liberate_cfg = LiberateConfig(**_liberate_raw)
+    else:
+        liberate_cfg = None
+
+    # CharLib config - required when backend == "charlib"; absent otherwise
+    _charlib_raw = raw.get("charlib")
+    charlib_cfg = CharLibConfig(**_charlib_raw) if _charlib_raw is not None else None
+
     # Clocking — optional (defaults live in scripts/clocking.py)
     clocking_cfg        = clocking.load_clocking_config(raw.get("clocking"))
     clocking_hidden_cfg = clocking.load_clocking_hidden(raw.get("clocking_hidden"))
@@ -645,9 +683,9 @@ def load_config(config_path: str, pdk_config: str = None) -> Config:
                             ),
         termination_hidden  = term_hidden,
         rx                  = rx_cfg,
-        liberate            = LiberateConfig(**raw["liberate"]),
         output              = OutputConfig(**raw["output"]),
         sweep               = SweepConfig(**raw["sweep"]),
+        backend             = backend,
         rx_sizing           = rx_sizing_cfg,
         tx_sizing           = tx_sizing_cfg,
         co_opt              = co_opt_cfg,
@@ -656,6 +694,8 @@ def load_config(config_path: str, pdk_config: str = None) -> Config:
         clocking            = clocking_cfg,
         clocking_hidden     = clocking_hidden_cfg,
         pdk_path            = pdk_path,
+        liberate            = liberate_cfg,
+        charlib             = charlib_cfg,
     )
 
 
@@ -720,8 +760,21 @@ def validate_config(cfg: Config) -> None:
         if not cfg.sweep.data_rate_Gbps:
             errors.append("[sweep] data_rate_Gbps list is empty")
 
-    if not os.path.isdir(cfg.liberate.template_dir):
-        errors.append(f"[liberate] template_dir not found: {cfg.liberate.template_dir}")
+    if cfg.backend == "liberate":
+        if cfg.liberate is None:
+            errors.append("[liberate] backend selected but 'liberate' section is missing or incomplete in config")
+        elif not os.path.isdir(cfg.liberate.template_dir):
+            errors.append(f"[liberate] template_dir not found: {cfg.liberate.template_dir}")
+    elif cfg.backend == "charlib":
+        if cfg.charlib is None:
+            errors.append("[charlib] backend selected but 'charlib' section is missing or incomplete in config")
+        else:
+            if not os.path.isfile(cfg.charlib.charlib_executable):
+                errors.append(f"[charlib] charlib_executable not found: {cfg.charlib.charlib_executable}")
+            if not os.path.isfile(cfg.charlib.ngspice_library_path):
+                errors.append(f"[charlib] ngspice_library_path not found: {cfg.charlib.ngspice_library_path}")
+    else:
+        errors.append(f"[backend] must be 'liberate' or 'charlib', got {cfg.backend!r}")
 
     if errors:
         raise ValueError("Configuration validation failed:\n"
