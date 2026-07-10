@@ -1204,6 +1204,7 @@ settings:
     backend: ngspice-shared
     combinational_leakage_procedure: combinational_leakage
     combinational_dynamic_power_procedure: combinational_dynamic_power
+    input_capacitance_procedure: charge_integration
   debug: false
 
 cells:
