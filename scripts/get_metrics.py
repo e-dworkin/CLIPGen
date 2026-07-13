@@ -535,12 +535,29 @@ def extract(cfg, ch_result, eq_result, term_result, tx_result, run_dir: str) -> 
     tx_lib_path = os.path.join(run_dir, "tx", "LIBRARY", "txip_nldm.lib")
     rx_lib_path = os.path.join(run_dir, "rx", "LIBRARY", "rxip_nldm.lib")
 
-    if use_charlib:
+    rx = _extract_from_lib_charlib(rx_lib_path, "rx", warnings) if use_charlib \
+        else _parse_rx_datasheet(rx_ds_path, warnings)
+
+    # For CharLib with channel_rc_integrated, three libs exist in separate dirs:
+    #   tx/LIBRARY/txip_nldm.lib         - TX-only, swept loads
+    #   tx_channel/LIBRARY/txip_ch_nldm.lib  - TX + channel Pi-ladder
+    #   tx_full/LIBRARY/txip_full_nldm.lib   - TX + channel + RX bump/pad
+    # _compute_energy expects `tx` to be the most-complete result (TX+full for CharLib,
+    # full netlist for Liberate), so we read the TX+full lib as `tx` and keep the
+    # TX-only and TX+channel libs separate for energy subtraction.
+    tx_only_data    = None
+    tx_channel_data = None
+
+    if use_charlib and channel_rc_integrated:
+        tx_ch_lib   = os.path.join(run_dir, "tx_channel", "LIBRARY", "txip_ch_nldm.lib")
+        tx_full_lib = os.path.join(run_dir, "tx_full",    "LIBRARY", "txip_full_nldm.lib")
+        tx_only_data    = _extract_from_lib_charlib(tx_lib_path, "tx", warnings)
+        tx_channel_data = _extract_from_lib_charlib(tx_ch_lib,   "tx", warnings)
+        tx              = _extract_from_lib_charlib(tx_full_lib,  "tx", warnings)
+    elif use_charlib:
         tx = _extract_from_lib_charlib(tx_lib_path, "tx", warnings)
-        rx = _extract_from_lib_charlib(rx_lib_path, "rx", warnings)
     else:
         tx = _parse_tx_datasheet(tx_ds_path, warnings)
-        rx = _parse_rx_datasheet(rx_ds_path, warnings)
 
     # --- Fill in transition times from .lib files (Liberate only; CharLib path already
     # populated via _extract_from_lib_charlib above) ---
@@ -561,17 +578,16 @@ def extract(cfg, ch_result, eq_result, term_result, tx_result, run_dir: str) -> 
         rx.update(rx_lib_delay)
 
     # When channel RC is embedded in the TX netlist, tx_result.load_pF is the
-    # RX device input capacitance used as the TX Liberate external load.  The
-    # energy to charge that cap is embedded in E_tx and is re-attributed to E_rx
-    # inside _compute_energy so that E_rx reflects all RX-side dissipation.
+    # RX device input capacitance used as the external CharLib/Liberate load.
+    # The energy to charge that cap is embedded in E_tx and is re-attributed to
+    # E_rx inside _compute_energy so that E_rx reflects all RX-side dissipation.
     rx_cap_in_pF = 0.0
     if channel_rc_integrated:
         rx_cap_in_pF = getattr(tx_result, 'load_pF', 0.0)
 
-    # Parse tx_only and tx_channel datasheets for 3-tier energy breakdown
-    tx_only_data    = None
-    tx_channel_data = None
-    if channel_rc_integrated:
+    # Liberate 3-tier breakdown: parse tx_only and tx_channel from DATASHEET files.
+    # (CharLib 3-tier breakdown is handled above via the lib files directly.)
+    if channel_rc_integrated and not use_charlib:
         tx_only_dir    = getattr(tx_result, 'tx_only_dir',    None)
         tx_channel_dir = getattr(tx_result, 'tx_channel_dir', None)
         if tx_only_dir:
