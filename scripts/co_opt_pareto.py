@@ -1088,6 +1088,7 @@ def run_co_opt(
                 rx_cap_in_pF       = tx_load_sweep,
                 tx_sizing_result   = tx_sizing_override,
                 cap_in_pF_override = cap_in_pF_override,
+                co_opt_mode        = True,
             )
             lib_path = os.path.join(tx_dir, "tx", "LIBRARY", "txip_nldm.lib")
             return tx_idx, lib_path, True
@@ -1105,10 +1106,14 @@ def run_co_opt(
         cfg_rx.rx.w_preamp_p_um = wp1
         cfg_rx.rx.w_buf_n_um    = wn2
         cfg_rx.rx.w_buf_p_um    = wp2
-        cfg_rx.liberate.input_slews_ns = rx_slew_sweep
+        if cfg_rx.liberate is not None:
+            cfg_rx.liberate.input_slews_ns = rx_slew_sweep
+        if cfg_rx.charlib is not None:
+            cfg_rx.charlib.input_slews_ns = rx_slew_sweep
         try:
             rx_result = rx_mod.gen_netlist(
-                cfg_rx, ch_result, term_result, rx_dir, tx_result=None
+                cfg_rx, ch_result, term_result, rx_dir, tx_result=None,
+                co_opt_mode=True,
             )
             lib_path = os.path.join(rx_dir, "rx", "LIBRARY", "rxip_nldm.lib")
             return rx_idx, lib_path, True
