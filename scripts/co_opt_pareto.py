@@ -925,21 +925,39 @@ def run_co_opt(
     if cap_in_pF_override is None:
         _cap_meas_dir = os.path.join(co_opt_dir, "cap_meas")
         os.makedirs(_cap_meas_dir, exist_ok=True)
-        _measured = tx_mod._measure_inv_cap_spice(
-            lib_path        = cfg.process.lib_path,
-            lib_corner      = cfg.process.lib_corner,
-            w_n_um          = tx_obj.w_n_um,
-            w_p_um          = tx_obj.w_p_um,
-            l_um            = tx_obj.l_um,
-            nf              = tx_obj.nf,
-            vdd             = cfg.process.vdd,
-            nmos_name       = tx_obj.nmos_name,
-            pmos_name       = tx_obj.pmos_name,
-            work_dir        = _cap_meas_dir,
-            temp            = cfg.process.temp,
-            spec            = tx_mod.DeviceSpec.from_cfg(cfg),
-            model_include_format = cfg.process.model_include_format,
-        )
+        if cfg.backend == "charlib":
+            _measured = tx_mod._measure_inv_cap_ngspice(
+                lib_path             = cfg.process.lib_path,
+                lib_corner           = cfg.process.lib_corner,
+                w_n_um               = tx_obj.w_n_um,
+                w_p_um               = tx_obj.w_p_um,
+                l_um                 = tx_obj.l_um,
+                nf                   = tx_obj.nf,
+                vdd                  = cfg.process.vdd,
+                nmos_name            = tx_obj.nmos_name,
+                pmos_name            = tx_obj.pmos_name,
+                work_dir             = _cap_meas_dir,
+                ngspice_exe          = cfg.charlib.ngspice_executable,
+                temp                 = cfg.process.temp,
+                spec                 = tx_mod.DeviceSpec.from_cfg(cfg),
+                model_include_format = cfg.process.model_include_format,
+            )
+        else:
+            _measured = tx_mod._measure_inv_cap_spice(
+                lib_path             = cfg.process.lib_path,
+                lib_corner           = cfg.process.lib_corner,
+                w_n_um               = tx_obj.w_n_um,
+                w_p_um               = tx_obj.w_p_um,
+                l_um                 = tx_obj.l_um,
+                nf                   = tx_obj.nf,
+                vdd                  = cfg.process.vdd,
+                nmos_name            = tx_obj.nmos_name,
+                pmos_name            = tx_obj.pmos_name,
+                work_dir             = _cap_meas_dir,
+                temp                 = cfg.process.temp,
+                spec                 = tx_mod.DeviceSpec.from_cfg(cfg),
+                model_include_format = cfg.process.model_include_format,
+            )
         if _measured is not None:
             cap_in_pF_override = _measured
             print(f"  [Co-opt] TX unit-inverter cap: {_measured*1000:.3f} fF  ({"SPICE" if cfg.backend == "liberate" else "ngspice"} measurement)")
