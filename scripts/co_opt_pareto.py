@@ -3,7 +3,7 @@ co_opt_pareto.py — joint TX/RX sizing with Pareto-frontier search.
 
 Characterizes each TX config over a load sweep and each RX config over an
 input-slew sweep, then matches all TX/RX pairs by interpolation to build the
-(energy/bit, delay) Pareto frontier in O(N_tx + N_rx) Liberate runs.
+(energy/bit, delay) Pareto frontier in O(N_tx + N_rx) Liberate/CharLib runs.
 """
 
 import contextlib
@@ -51,7 +51,7 @@ _BR_LO, _BR_HI = 1.0,  4.0   # RX beta range
 @dataclass
 class CoOptCandidate:
     """
-    One (TX configuration, RX configuration) pair evaluated via full Liberate run.
+    One (TX configuration, RX configuration) pair evaluated via full Liberate/CharLib run.
 
     Parameters are populated at construction time; result fields are filled
     in-place by _run_one_pair() during Phase 2.
@@ -72,7 +72,7 @@ class CoOptCandidate:
     rx_w_buf_p_um:     float
 
     # Results — populated progressively by _run_one_pair()
-    rx_cap_in_pF:       float = 0.0   # from initial RX Liberate
+    rx_cap_in_pF:       float = 0.0   # from initial RX characterization
     tx_slew_ns:         float = 0.0   # max(rise, fall) TX output slew from NLDM .lib
     slew_ui_frac:       float = 0.0   # tx_slew_ns / UI_ns
     slew_feasible:      bool  = False  # True iff tx_slew_ns ≤ target_ns
@@ -834,7 +834,7 @@ def run_co_opt(
     """
     Run the TX/RX co-optimisation Pareto search using a lookup-table approach.
 
-    Lookup-Table Methodology  (O(N_tx + N_rx) Liberate runs)
+    Lookup-Table Methodology  (O(N_tx + N_rx) Liberate/CharLib runs)
     ---------------------------------------------------------
     Each TX configuration is characterised once with a **sweep of output
     loads** (covering the full range of possible RX input capacitances).
@@ -852,7 +852,7 @@ def run_co_opt(
       3. Interpolate RX_j tables at input_slew = TX_i output slew → RX metrics.
       4. Sum delays and energies.
 
-    This reduces N_tx × N_rx Liberate invocations to N_tx + N_rx — a
+    This reduces N_tx × N_rx Liberate/CharLib invocations to N_tx + N_rx — a
     factor-of-min(N_tx, N_rx) speed-up.
 
     Parameters
@@ -866,13 +866,13 @@ def run_co_opt(
     n_tx_configs       : Number of TX configurations to explore (default 8)
     n_rx_configs       : Number of RX configurations to explore (default 8)
     cap_in_pF_override : Unit inverter cap override (skips Q/V sim)
-    max_parallel       : Maximum concurrent Liberate runs (default 4)
+    max_parallel       : Maximum concurrent Liberate/CharLib runs (default 4)
     n_tx_load_points   : Number of load-sweep points for TX characterisation (default 6)
     n_rx_slew_points   : Number of slew-sweep points for RX characterisation (default 6)
 
     Returns
     -------
-    CoOptResult or None if all Liberate runs failed.
+    CoOptResult or None if all characterization runs failed.
     """
     import rx as rx_mod
     import tx as tx_mod
@@ -912,7 +912,7 @@ def run_co_opt(
           f"({max_latency_ns/ui_ns:.0f} UI, excl. channel)")
     print(f"  [Co-opt] TX configs: {n_tx_configs}  |  RX configs: {n_rx_configs}  "
           f"|  Total pairs: {total_pairs}")
-    print(f"  [Co-opt] Liberate runs: {n_tx_configs + n_rx_configs}  "
+    print(f"  [Co-opt] {'Liberate' if cfg.backend == 'liberate' else 'CharLib'} runs: {n_tx_configs + n_rx_configs}  "
           f"(lookup-table, {max_parallel} parallel)")
 
     # ------------------------------------------------------------------
@@ -942,7 +942,7 @@ def run_co_opt(
         )
         if _measured is not None:
             cap_in_pF_override = _measured
-            print(f"  [Co-opt] TX unit-inverter cap: {_measured*1000:.3f} fF  (SPICE measurement)")
+            print(f"  [Co-opt] TX unit-inverter cap: {_measured*1000:.3f} fF  ({"SPICE" if cfg.backend == "liberate" else "ngspice"} measurement)")
         else:
             print(f"  [Co-opt] TX unit-inverter cap: measurement failed, using analytical fallback")
 
@@ -1008,7 +1008,7 @@ def run_co_opt(
           f"(sized for {rx_cap_sizing_pF*1000:.1f} fF RX cap, TX C_in: {cap_src})")
 
     # ------------------------------------------------------------------
-    # Phase 2 — Determine sweep ranges and run all Liberate in parallel
+    # Phase 2 — Determine sweep ranges and run all Liberate/CharLib in parallel
     # ------------------------------------------------------------------
 
     # TX load sweep: the RX PAD cap has two components with different certainty:
@@ -1055,7 +1055,7 @@ def run_co_opt(
             for k in range(n_rx_slew_points)
         ]
 
-    print(f"\n  [Co-opt] Phase 2: Running Liberate characterisations "
+    print(f"\n  [Co-opt] Phase 2: Running {'Liberate' if cfg.backend == 'liberate' else 'CharLib'} characterisations "
           f"({len(tx_configs)} TX + {len(rx_cfgs)} RX, {max_parallel} parallel)...")
     print(f"  [Co-opt]   TX load sweep  : {[f'{v*1000:.2f}' for v in tx_load_sweep]} fF")
     print(f"  [Co-opt]   RX slew sweep  : {[f'{v*1000:.1f}' for v in rx_slew_sweep]} ps")
@@ -1093,7 +1093,7 @@ def run_co_opt(
             lib_path = os.path.join(tx_dir, "tx", "LIBRARY", "txip_nldm.lib")
             return tx_idx, lib_path, True
         except Exception as exc:
-            print(f"    TX {tx_idx}: Liberate FAILED — {exc}")
+            print(f"    TX {tx_idx}: {'Liberate' if cfg.backend == 'liberate' else 'CharLib'} FAILED — {exc}")
             return tx_idx, None, False
 
     # ---- RX characterisation worker ----
@@ -1118,7 +1118,7 @@ def run_co_opt(
             lib_path = os.path.join(rx_dir, "rx", "LIBRARY", "rxip_nldm.lib")
             return rx_idx, lib_path, True
         except Exception as exc:
-            print(f"    RX {rx_idx}: Liberate FAILED — {exc}")
+            print(f"    RX {rx_idx}: {'Liberate' if cfg.backend == 'liberate' else 'CharLib'} FAILED — {exc}")
             return rx_idx, None, False
 
     # Submit all TX and RX jobs in parallel
@@ -1166,7 +1166,7 @@ def run_co_opt(
           f"RX ok: {n_rx_ok}/{len(rx_cfgs)}")
 
     if n_tx_ok == 0 or n_rx_ok == 0:
-        print("  [Co-opt] ERROR: No successful Liberate runs.  Aborting.")
+        print(f"  [Co-opt] ERROR: No successful {'Liberate' if cfg.backend == 'liberate' else 'CharLib'} runs.  Aborting.")
         return None
 
     # ------------------------------------------------------------------
