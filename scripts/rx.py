@@ -1405,19 +1405,17 @@ def parse_tx_output_transition(tx_dir: str) -> Optional[List[float]]:
 
 
 def gen_netlist(cfg, ch_result, term_result, run_dir: str,
-               tx_result=None, co_opt_mode: bool = False) -> RxNetlistResult:
+               tx_result=None) -> RxNetlistResult:
     """Dispatch to the selected backend."""
     if cfg.backend == "charlib":
         return _gen_netlist_charlib(cfg, ch_result, term_result, run_dir,
-                                    tx_result=tx_result,
-                                    co_opt_mode=co_opt_mode)
+                                    tx_result=tx_result)
     return _gen_netlist_liberate(cfg, ch_result, term_result, run_dir,
                                  tx_result=tx_result)
 
 
 def _gen_netlist_charlib(cfg, ch_result, term_result, run_dir: str,
-                          tx_result=None,
-                          co_opt_mode: bool = False) -> RxNetlistResult:
+                          tx_result=None) -> RxNetlistResult:
     """CharLib + ngspice backend: write RX SPICE + YAML, run charlib, return result."""
     cl   = cfg.charlib
     proc = cfg.process
@@ -1430,7 +1428,7 @@ def _gen_netlist_charlib(cfg, ch_result, term_result, run_dir: str,
 
     use_term   = term_result.use_termination
     r_rx       = term_result.r_term_ohm if use_term else getattr(term_hid, 'r_rx_ohm', 0.0)
-    lane_count = 1 if co_opt_mode else cfg.link.lane_count
+    lane_count = cfg.link.lane_count
     spec       = DeviceSpec.from_cfg(cfg)
 
     # Analytical cap estimate (Q/V measurement requires ngspice with RX netlist,
@@ -1472,17 +1470,11 @@ def _gen_netlist_charlib(cfg, ch_result, term_result, run_dir: str,
                         flags=re.MULTILINE)
     _write(rx_dir, "model.sp", model_text)
 
-    # Write charlib.yaml (co_opt: single-lane 'rx' cell; full run: multi-lane 'rxip')
-    cell_name = "rx" if co_opt_mode else "rxip"
-    if cell_name == "rx":
-        in_pins = ["PAD"]
-        out_pins = ["OUT"]
-        funcs = ["OUT = PAD"]
-    else:
-        in_pins  = [f"PAD_{i}" for i in range(lane_count)]
-        out_pins = [f"OUT_{i}" for i in range(lane_count)]
-        funcs    = [f"OUT_{i} = PAD_{i}" for i in range(lane_count)]
-        
+    # Write charlib.yaml
+    in_pins  = [f"PAD_{i}" for i in range(lane_count)]
+    out_pins = [f"OUT_{i}" for i in range(lane_count)]
+    funcs    = [f"OUT_{i} = PAD_{i}" for i in range(lane_count)]
+
     slew_str = "[" + ", ".join(str(s) for s in input_slews_ns) + "]"
     load_str = "[" + ", ".join(str(l) for l in cl.output_loads_pF) + "]"
     in_str   = "[" + ", ".join(in_pins)  + "]"
@@ -1525,7 +1517,7 @@ settings:
   debug: false
 
 cells:
-  {cell_name}:
+  rxip:
     inputs: {in_str}
     outputs: {out_str}
     functions: {func_str}

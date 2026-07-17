@@ -1841,15 +1841,13 @@ def _parse_tx_channel_results(tx_result: TxNetlistResult, ds_path: str) -> None:
 def gen_netlist(cfg, ch_result, eq_result, run_dir: str,
                rx_cap_in_pF=None,
                tx_sizing_result=None,
-               cap_in_pF_override: Optional[float] = None,
-               co_opt_mode: bool = False) -> TxNetlistResult:
+               cap_in_pF_override: Optional[float] = None) -> TxNetlistResult:
     """Dispatch to the selected backend."""
     if cfg.backend == "charlib":
         return _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir,
                                     rx_cap_in_pF=rx_cap_in_pF,
                                     tx_sizing_result=tx_sizing_result,
-                                    cap_in_pF_override=cap_in_pF_override,
-                                    co_opt_mode=co_opt_mode)
+                                    cap_in_pF_override=cap_in_pF_override)
     return _gen_netlist_liberate(cfg, ch_result, eq_result, run_dir,
                                  rx_cap_in_pF=rx_cap_in_pF,
                                  tx_sizing_result=tx_sizing_result,
@@ -1859,8 +1857,7 @@ def gen_netlist(cfg, ch_result, eq_result, run_dir: str,
 def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
                           rx_cap_in_pF=None,
                           tx_sizing_result=None,
-                          cap_in_pF_override: Optional[float] = None,
-                          co_opt_mode: bool = False) -> TxNetlistResult:
+                          cap_in_pF_override: Optional[float] = None) -> TxNetlistResult:
     """CharLib + ngspice backend: write SPICE + YAML, run charlib, return result."""
     tx   = cfg.transistor
     cl   = cfg.charlib
@@ -1956,7 +1953,6 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
         vdd             = proc.vdd,
         temp            = proc.temp,
         lane_count      = cfg.link.lane_count,
-        cell_name       = cell_name,
     )
     _write(tx_dir, "charlib.yaml", yaml_text)
 
