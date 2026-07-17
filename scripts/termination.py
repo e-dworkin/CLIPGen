@@ -79,7 +79,7 @@ class TerminationResult:
                 f"  R_term (actual)  : {self.r_term_ohm:.1f} Ohm",
                 f"  C_ac (actual)    : {self.c_ac_pF:.1f} pF",
                 f"  AC-coupled       : {self.ac_coupled}",
-                "  Energy           : captured by the RX Liberate run (the RT +",
+                "  Energy           : captured by the RX Liberate/CharLib run (the RT +",
                 "                     bias network lives in rxip.scs on the PAD).",
             ]
         else:

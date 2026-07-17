@@ -103,7 +103,7 @@ def _write_tx(cfg, metrics, tx_result, path: str, num_lanes: int) -> None:
             L.append(f"//   Stage {i+1}: w={sz} um")
     L += [
         "//",
-        "// Timing (Liberate, mid slew/load):",
+        "// Timing (Liberate/CharLib, mid slew/load):",
         f"//   in->PAD rise={rise_ns:.4f} ns  fall={fall_ns:.4f} ns",
         f"//   Channel Elmore={ch_ns:.4f} ns  (R={R_ch:.2f} ohm, C={C_ch:.1f} fF)",
         "//",
@@ -167,7 +167,7 @@ def _write_tx(cfg, metrics, tx_result, path: str, num_lanes: int) -> None:
 
     # specify
     L += [
-        "    // STA arc (Liberate, cell only)",
+        "    // STA arc (Liberate/CharLib, cell only)",
         "    specify",
         f"        ( posedge in => (PAD +: in) ) = ({rise_ps}, {fall_ps});",
         f"        ( negedge in => (PAD -: in) ) = ({fall_ps}, {rise_ps});",

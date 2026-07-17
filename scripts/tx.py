@@ -84,7 +84,7 @@ class TxNetlistResult:
             f"  Channel RC in netlist: {ch_rc_label}",
             f"  Inverter cap    : {self.cap_in_pF:.5f} pF  [{self.cap_in_source}]",
             f"  Inverter stages : {self.num_stages}",
-            f"  Output load     : {self.load_pF:.4f} pF  (external Liberate load)",
+            f"  Output load     : {self.load_pF:.4f} pF  (external Liberate/CharLib load)",
         ]
         for i, (wn, wp) in enumerate(self.inverter_sizes):
             lines.append(f"    Stage {i+1}: NMOS={wn:.4f}u  PMOS={wp:.4f}u")
