@@ -538,26 +538,13 @@ def extract(cfg, ch_result, eq_result, term_result, tx_result, run_dir: str) -> 
     rx = _extract_from_lib_charlib(rx_lib_path, "rx", warnings) if use_charlib \
         else _parse_rx_datasheet(rx_ds_path, warnings)
 
-    # For CharLib with channel_rc_integrated, three libs exist in separate dirs:
-    #   tx/LIBRARY/txip_nldm.lib         - TX-only, swept loads
-    #   tx_channel/LIBRARY/txip_ch_nldm.lib  - TX + channel Pi-ladder
-    #   tx_full/LIBRARY/txip_full_nldm.lib   - TX + channel + RX bump/pad
-    # _compute_energy expects `tx` to be the most-complete result (TX+full for CharLib,
-    # full netlist for Liberate), so we read the TX+full lib as `tx` and keep the
-    # TX-only and TX+channel libs separate for energy subtraction.
-    tx_only_data    = None
-    tx_channel_data = None
-
-    if use_charlib and channel_rc_integrated:
-        tx_ch_lib   = os.path.join(run_dir, "tx_channel", "LIBRARY", "txip_ch_nldm.lib")
-        tx_full_lib = os.path.join(run_dir, "tx_full",    "LIBRARY", "txip_full_nldm.lib")
-        tx_only_data    = _extract_from_lib_charlib(tx_lib_path, "tx", warnings)
-        tx_channel_data = _extract_from_lib_charlib(tx_ch_lib,   "tx", warnings)
-        tx              = _extract_from_lib_charlib(tx_full_lib,  "tx", warnings)
-    elif use_charlib:
-        tx = _extract_from_lib_charlib(tx_lib_path, "tx", warnings)
-    else:
-        tx = _parse_tx_datasheet(tx_ds_path, warnings)
+    # `tx` always comes from the main run's "tx/" directory — the most-complete
+    # result available (full topology, channel+RX-bump/pad, when
+    # channel_rc_integrated; no-channel otherwise), mirroring the Liberate
+    # path's tx_ds_path exactly. The tx_only/tx_channel 3-tier breakdown below
+    # is a separate, additional decomposition read from their own directories.
+    tx = _extract_from_lib_charlib(tx_lib_path, "tx", warnings) if use_charlib \
+        else _parse_tx_datasheet(tx_ds_path, warnings)
 
     # --- Fill in transition times from .lib files (Liberate only; CharLib path already
     # populated via _extract_from_lib_charlib above) ---
@@ -585,17 +572,28 @@ def extract(cfg, ch_result, eq_result, term_result, tx_result, run_dir: str) -> 
     if channel_rc_integrated:
         rx_cap_in_pF = getattr(tx_result, 'load_pF', 0.0)
 
-    # Liberate 3-tier breakdown: parse tx_only and tx_channel from DATASHEET files.
-    # (CharLib 3-tier breakdown is handled above via the lib files directly.)
-    if channel_rc_integrated and not use_charlib:
-        tx_only_dir    = getattr(tx_result, 'tx_only_dir',    None)
-        tx_channel_dir = getattr(tx_result, 'tx_channel_dir', None)
-        if tx_only_dir:
-            tx_only_ds = os.path.join(tx_only_dir, "DATASHEET", "txip.txt")
-            tx_only_data = _parse_tx_datasheet(tx_only_ds, warnings)
-        if tx_channel_dir:
-            tx_ch_ds = os.path.join(tx_channel_dir, "DATASHEET", "txip.txt")
-            tx_channel_data = _parse_tx_datasheet(tx_ch_ds, warnings)
+    # 3-tier breakdown: tx_only (no channel) and tx_channel (channel, no RX
+    # bump/pad) comparison runs, gated on channel_rc_integrated exactly like
+    # the run functions in tx.py that produce them. CharLib reads its own
+    # tx_only/tx_channel .lib files directly; Liberate parses DATASHEET files
+    # from the directories tx_result.tx_only_dir/tx_channel_dir point to.
+    tx_only_data    = None
+    tx_channel_data = None
+    if channel_rc_integrated:
+        if use_charlib:
+            tx_only_lib = os.path.join(run_dir, "tx_only",   "LIBRARY", "txip_only_nldm.lib")
+            tx_ch_lib   = os.path.join(run_dir, "tx_channel", "LIBRARY", "txip_ch_nldm.lib")
+            tx_only_data    = _extract_from_lib_charlib(tx_only_lib, "tx", warnings)
+            tx_channel_data = _extract_from_lib_charlib(tx_ch_lib,   "tx", warnings)
+        else:
+            tx_only_dir    = getattr(tx_result, 'tx_only_dir',    None)
+            tx_channel_dir = getattr(tx_result, 'tx_channel_dir', None)
+            if tx_only_dir:
+                tx_only_ds = os.path.join(tx_only_dir, "DATASHEET", "txip.txt")
+                tx_only_data = _parse_tx_datasheet(tx_only_ds, warnings)
+            if tx_channel_dir:
+                tx_ch_ds = os.path.join(tx_channel_dir, "DATASHEET", "txip.txt")
+                tx_channel_data = _parse_tx_datasheet(tx_ch_ds, warnings)
 
     energy = _compute_energy(tx, rx, ch_result, term_result, cfg,
                              channel_rc_integrated=channel_rc_integrated,

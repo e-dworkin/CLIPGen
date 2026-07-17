@@ -1360,14 +1360,112 @@ def gen_tx_only_run(cfg, ch_result, eq_result, tx_result: TxNetlistResult,
                     rx_cap_in_pF: Optional[float] = None) -> TxNetlistResult:
     """Dispatch to the selected backend."""
     if cfg.backend == "charlib":
-        return _gen_tx_only_run_charlib(tx_result)
+        return _gen_tx_only_run_charlib(cfg, ch_result, eq_result, tx_result,
+                                        run_dir, rx_cap_in_pF=rx_cap_in_pF)
     return _gen_tx_only_run_liberate(cfg, ch_result, eq_result, tx_result,
                                      run_dir, rx_cap_in_pF=rx_cap_in_pF)
 
 
-def _gen_tx_only_run_charlib(tx_result: TxNetlistResult) -> TxNetlistResult:
-    """CharLib backend: no-op. The TX-only lib is already the main characterization output
-    written by _gen_netlist_charlib; tx_result.tx_only_dir already points to it."""
+def _gen_tx_only_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistResult,
+                             run_dir: str,
+                             rx_cap_in_pF: Optional[float] = None) -> TxNetlistResult:
+    """
+    CharLib backend: run the TX+EQ-only ("no channel") characterization.
+
+    This produces a direct measurement of TX-only propagation delay and
+    output slew, without the channel RC ladder. The result is used together
+    with the RX delay to form the UCIe TX+RX latency constraint (excluding
+    channel). Mirrors _gen_tx_only_run_liberate.
+
+    Skips silently (no-op) if channel_rc_integrated is False, because the
+    regular TX CharLib run (tx/, from _gen_netlist_charlib) already IS the
+    no-channel characterization in that case.
+    """
+    if not tx_result.channel_rc_integrated:
+        return tx_result
+
+    tx   = cfg.transistor
+    cl   = cfg.charlib
+    proc = cfg.process
+
+    tx_only_dir = os.path.join(run_dir, "tx_only")
+    os.makedirs(tx_only_dir, exist_ok=True)
+    tx_result.tx_only_dir = tx_only_dir
+
+    rx_load_pF = rx_cap_in_pF if rx_cap_in_pF is not None else cl.output_loads_pF[0]
+    rx_load_scalar = rx_load_pF[0] if isinstance(rx_load_pF, (list, tuple)) else rx_load_pF
+    print(f"  [TX-only/charlib] Using load: {rx_load_scalar:.5f} pF")
+
+    sp_text = _gen_txip_sp(
+        lane_count  = cfg.link.lane_count,
+        inv_sizes   = tx_result.inverter_sizes,
+        use_eq      = tx_result.use_equalization,
+        R_eq_ohm    = tx_result.R_eq_ohm,
+        C_eq_fF     = tx_result.C_eq_fF,
+        l_um        = tx.l_um,
+        nmos_name   = tx.nmos_name,
+        pmos_name   = tx.pmos_name,
+        nf          = tx.nf,
+        spec        = DeviceSpec.from_cfg(cfg),
+        w_max_um    = tx.w_max_um,
+        nf_auto     = True,
+    )
+    _write(tx_only_dir, "txip.sp", sp_text)
+
+    model_text = _gen_model_sp(proc.lib_path, proc.lib_corner,
+                               getattr(proc, 'lib_corner2', None),
+                               fmt=proc.model_include_format)
+    model_text = re.sub(r'^\s*simulator\s+lang\s*=.*$', '', model_text,
+                        flags=re.MULTILINE)
+    _write(tx_only_dir, "model.sp", model_text)
+
+    yaml_text = _gen_charlib_yaml(
+        lib_name        = "txip_only_nldm",
+        results_dir     = "LIBRARY",
+        netlist_path    = "txip.sp",
+        model_path      = "model.sp",
+        input_slews_ns  = cl.input_slews_ns,
+        output_loads_pF = [rx_load_scalar],
+        vdd             = proc.vdd,
+        temp            = proc.temp,
+        lane_count      = cfg.link.lane_count,
+    )
+    _write(tx_only_dir, "charlib_only.yaml", yaml_text)
+
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env["NGSPICE_LIBRARY_PATH"] = cl.ngspice_library_path
+
+    print(f"  [TX-only/charlib] Running CharLib in {tx_only_dir} ...")
+    proc_only = subprocess.run(
+        [cl.charlib_executable, "run", "charlib_only.yaml"],
+        cwd=tx_only_dir,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+    )
+    print(proc_only.stdout)
+    if proc_only.returncode != 0:
+        raise RuntimeError(
+            f"[TX-only/charlib] CharLib failed with exit code {proc_only.returncode} "
+            f"in {tx_only_dir}"
+        )
+    print("  [TX-only/charlib] CharLib complete.")
+
+    # Parse TX-only delay and slew straight from the .lib file (CharLib runs
+    # have no DATASHEET, unlike Liberate's _parse_tx_only_results source).
+    import lib_parser
+    lib_path = os.path.join(tx_only_dir, "LIBRARY", "txip_only_nldm.lib")
+    try:
+        timing = lib_parser.parse_lib_timing(lib_path)
+        tx_result.tx_only_delay_rr_ns = timing.get("avg_cell_rise_ns", 0.0)
+        tx_result.tx_only_delay_ff_ns = timing.get("avg_cell_fall_ns", 0.0)
+        tx_result.tx_only_slew_rr_ns  = timing.get("avg_rise_transition_ns", 0.0)
+        tx_result.tx_only_slew_ff_ns  = timing.get("avg_fall_transition_ns", 0.0)
+    except Exception as e:
+        warnings.warn(f"[TX-only/charlib] failed to parse .lib timing: {e}")
+
     return tx_result
 
 
@@ -1558,21 +1656,19 @@ def _gen_tx_channel_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistR
                                 run_dir: str,
                                 rx_cap_in_pF: Optional[float] = None) -> TxNetlistResult:
     """
-    CharLib backend: run two additional characterizations for energy decomposition.
+    CharLib backend: run the TX+channel ("no RX bump/pad") characterization.
 
-    TX+channel run (no RX bump/pad):
-      Characterizes TX gate + EQ + channel Pi-ladder (TX bump, trace, interposer pad,
-      RX ESD cap).  The external load is the RX device input cap.  Switching energy
-      from this run minus the TX-only run gives the channel dissipation.
+    Characterizes TX gate + EQ + channel Pi-ladder (TX bump, trace, interposer pad,
+    RX ESD cap). The external load is the RX device input cap. Switching energy
+    from this run minus the TX-only run (tx_only/, from _gen_tx_only_run_charlib)
+    gives the channel dissipation.
 
-    TX+full run (with RX bump/pad):
-      Adds RX bump and RX chiplet pad RC to the above.  Switching energy from this
-      run minus the TX+channel run gives the RX bump/pad dissipation.
-
-    Both results are written to subdirectories of run_dir alongside the TX-only
-    output already produced by _gen_netlist_charlib.  On return,
-    tx_result.channel_rc_integrated is True and tx_result.tx_channel_dir is set.
+    Written to run_dir/tx_channel/. Mirrors _gen_tx_channel_run_liberate, including
+    the channel_rc_integrated gate. On return, tx_result.tx_channel_dir is set.
     """
+    if not tx_result.channel_rc_integrated:
+        return tx_result
+
     tx   = cfg.transistor
     cl   = cfg.charlib
     proc = cfg.process
@@ -1589,28 +1685,26 @@ def _gen_tx_channel_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistR
     env.pop("PYTHONPATH", None)
     env["NGSPICE_LIBRARY_PATH"] = cl.ngspice_library_path
 
-    _sp_common = dict(
-        lane_count  = cfg.link.lane_count,
-        inv_sizes   = tx_result.inverter_sizes,
-        use_eq      = tx_result.use_equalization,
-        R_eq_ohm    = tx_result.R_eq_ohm,
-        C_eq_fF     = tx_result.C_eq_fF,
-        l_um        = tx.l_um,
-        nmos_name   = tx.nmos_name,
-        pmos_name   = tx.pmos_name,
-        nf          = tx.nf,
-        ch_result   = ch_result,
-        spec        = DeviceSpec.from_cfg(cfg),
-        w_max_um    = tx.w_max_um,
-        nf_auto     = True,
-    )
-
     # TX + channel Pi-ladder, no RX bump/pad.
     tx_channel_dir = os.path.join(run_dir, "tx_channel")
     os.makedirs(tx_channel_dir, exist_ok=True)
 
-    _write(tx_channel_dir, "txip_ch.sp",
-           _gen_txip_sp_with_channel(**_sp_common, include_rx_bump_pad=False))
+    _write(tx_channel_dir, "txip_ch.sp", _gen_txip_sp_with_channel(
+        lane_count          = cfg.link.lane_count,
+        inv_sizes           = tx_result.inverter_sizes,
+        use_eq              = tx_result.use_equalization,
+        R_eq_ohm            = tx_result.R_eq_ohm,
+        C_eq_fF             = tx_result.C_eq_fF,
+        l_um                = tx.l_um,
+        nmos_name           = tx.nmos_name,
+        pmos_name           = tx.pmos_name,
+        nf                  = tx.nf,
+        ch_result           = ch_result,
+        spec                = DeviceSpec.from_cfg(cfg),
+        w_max_um            = tx.w_max_um,
+        nf_auto             = True,
+        include_rx_bump_pad = False,
+    ))
     _write(tx_channel_dir, "model.sp", model_text)
     _write(tx_channel_dir, "charlib_ch.yaml", _gen_charlib_yaml(
         lib_name        = "txip_ch_nldm",
@@ -1641,45 +1735,7 @@ def _gen_tx_channel_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistR
         )
     print("  [TX+channel/charlib] CharLib complete.")
 
-    # TX + channel Pi-ladder + RX bump/pad.
-    tx_full_dir = os.path.join(run_dir, "tx_full")
-    os.makedirs(tx_full_dir, exist_ok=True)
-
-    _write(tx_full_dir, "txip_full.sp",
-           _gen_txip_sp_with_channel(**_sp_common, include_rx_bump_pad=True))
-    _write(tx_full_dir, "model.sp", model_text)
-    _write(tx_full_dir, "charlib_full.yaml", _gen_charlib_yaml(
-        lib_name        = "txip_full_nldm",
-        results_dir     = "LIBRARY",
-        netlist_path    = "txip_full.sp",
-        model_path      = "model.sp",
-        input_slews_ns  = cl.input_slews_ns,
-        output_loads_pF = [rx_load_pF],
-        vdd             = proc.vdd,
-        temp            = proc.temp,
-        lane_count      = cfg.link.lane_count,
-    ))
-
-    print(f"  [TX+full/charlib] Running CharLib in {tx_full_dir} ...")
-    proc_full = subprocess.run(
-        [cl.charlib_executable, "run", "charlib_full.yaml"],
-        cwd=tx_full_dir,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        universal_newlines=True,
-    )
-    print(proc_full.stdout)
-    if proc_full.returncode != 0:
-        raise RuntimeError(
-            f"[TX+full/charlib] CharLib failed with exit code {proc_full.returncode} "
-            f"in {tx_full_dir}"
-        )
-    print("  [TX+full/charlib] CharLib complete.")
-
-    tx_result.channel_rc_integrated = True
-    tx_result.tx_channel_dir        = tx_channel_dir
-    tx_result.load_pF               = rx_load_pF
+    tx_result.tx_channel_dir = tx_channel_dir
     return tx_result
 
 
@@ -1858,7 +1914,16 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
                           rx_cap_in_pF=None,
                           tx_sizing_result=None,
                           cap_in_pF_override: Optional[float] = None) -> TxNetlistResult:
-    """CharLib + ngspice backend: write SPICE + YAML, run charlib, return result."""
+    """
+    CharLib + ngspice backend: 
+    1. ngspice Q/V input cap simulation
+    2. Chain sizing
+    3. Write netlist
+    4. Write model.sp
+    5. Write CharLib YAML
+    6. Run CharLib
+    7. Return results
+    """
     tx   = cfg.transistor
     cl   = cfg.charlib
     proc = cfg.process
@@ -1901,8 +1966,17 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
             cap_in_source = "ngspice"
             print(f"  [TX/charlib] cap_in = {cap_in_pF:.5f} pF  ({cap_in_pF*1000:.3f} fF)")
 
-    # 2. Chain sizing (channel RC not embedded in CharLib run)
+    # 2. Chain sizing.  When the channel RC ladder + RX bump/pad will be
+    #    embedded in this netlist (tx_include_channel_rc=True), the driver
+    #    also charges the RX chiplet parasitics beyond the channel itself —
+    #    include that load in sizing, mirroring _gen_netlist_liberate.
+    use_channel_rc = getattr(cl, 'tx_include_channel_rc', False)
     cap_load_pF = ch_result.total_shunt_C_fF / 1000.0
+    if use_channel_rc and rx_cap_in_pF is not None:
+        rx_cap_scalar = rx_cap_in_pF[0] if isinstance(rx_cap_in_pF, (list, tuple)) else rx_cap_in_pF
+        cap_load_pF += rx_cap_scalar
+        print(f"  [TX/charlib] Chain sizing load: {ch_result.total_shunt_C_fF:.1f} fF (channel) "
+              f"+ {rx_cap_scalar*1000:.1f} fF (RX pad cap) = {cap_load_pF*1000:.1f} fF total")
     num_stages, inv_sizes = _size_inv_chain(
         w_n_min     = tx.w_n_um,
         w_p_min     = tx.w_p_um,
@@ -1916,21 +1990,41 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
         print(f"  [TX/charlib] Using TX sizing sweep result: {num_stages} stages, "
               f"beta={chosen.beta_ratio:.2f}, stage_ratio={chosen.stage_ratio:.2f}")
 
-    # 3. Write txip.sp (unit tx subckt + N-lane txip wrapper, no channel RC)
-    sp_text = _gen_txip_sp(
-        lane_count  = cfg.link.lane_count,
-        inv_sizes   = inv_sizes,
-        use_eq      = eq_result.use_equalization,
-        R_eq_ohm    = eq_result.R_eq_ohm,
-        C_eq_fF     = eq_result.C_eq_fF,
-        l_um        = tx.l_um,
-        nmos_name   = tx.nmos_name,
-        pmos_name   = tx.pmos_name,
-        nf          = tx.nf,
-        spec        = DeviceSpec.from_cfg(cfg),
-        w_max_um    = tx.w_max_um,
-        nf_auto     = True,
-    )
+    # 3. Write txip.sp. When tx_include_channel_rc is set, this is the full
+    #    TX+channel+RX-bump/pad topology (matching _gen_netlist_liberate's
+    #    use_channel_rc=True branch); otherwise the plain no-channel netlist.
+    if use_channel_rc:
+        sp_text = _gen_txip_sp_with_channel(
+            lane_count          = cfg.link.lane_count,
+            inv_sizes           = inv_sizes,
+            use_eq              = eq_result.use_equalization,
+            R_eq_ohm            = eq_result.R_eq_ohm,
+            C_eq_fF             = eq_result.C_eq_fF,
+            l_um                = tx.l_um,
+            nmos_name           = tx.nmos_name,
+            pmos_name           = tx.pmos_name,
+            nf                  = tx.nf,
+            ch_result           = ch_result,
+            spec                = DeviceSpec.from_cfg(cfg),
+            w_max_um            = tx.w_max_um,
+            nf_auto             = True,
+            include_rx_bump_pad = True,
+        )
+    else:
+        sp_text = _gen_txip_sp(
+            lane_count  = cfg.link.lane_count,
+            inv_sizes   = inv_sizes,
+            use_eq      = eq_result.use_equalization,
+            R_eq_ohm    = eq_result.R_eq_ohm,
+            C_eq_fF     = eq_result.C_eq_fF,
+            l_um        = tx.l_um,
+            nmos_name   = tx.nmos_name,
+            pmos_name   = tx.pmos_name,
+            nf          = tx.nf,
+            spec        = DeviceSpec.from_cfg(cfg),
+            w_max_um    = tx.w_max_um,
+            nf_auto     = True,
+        )
     _write(tx_dir, "txip.sp", sp_text)
 
     # 4. Write model.sp (strip Spectre-only 'simulator lang' directive)
@@ -1941,15 +2035,36 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
                         flags=re.MULTILINE)
     _write(tx_dir, "model.sp", model_text)
 
-    # 5. Write charlib.yaml
-    cell_name = "tx" if co_opt_mode else "txip"
+
+    # 5. Write charlib.yaml. Channel-embedded mode loads with the RX device
+    #    cap (single point, or the caller's full sweep — e.g. co_opt_pareto's
+    #    tx_load_sweep — preserved as-is), matching _gen_netlist_liberate's
+    #    use_channel_rc branch. The plain no-channel netlist keeps
+    #    sweeping the full config load list to build a general-purpose
+    #    Liberty NLDM table.
+    if use_channel_rc:
+        if rx_cap_in_pF is not None:
+            if isinstance(rx_cap_in_pF, (list, tuple)):
+                output_loads_for_yaml = list(rx_cap_in_pF)
+                print(f"  [TX/charlib] Using RX cap sweep as load: "
+                      f"{len(output_loads_for_yaml)} points "
+                      f"[{output_loads_for_yaml[0]:.5f} .. {output_loads_for_yaml[-1]:.5f}] pF")
+            else:
+                output_loads_for_yaml = [rx_cap_in_pF]
+                print(f"  [TX/charlib] Using measured RX input cap as load: {rx_cap_in_pF:.5f} pF")
+        else:
+            load_scalar = cl.output_loads_pF[0] if cl.output_loads_pF else 0.0
+            print(f"  [TX/charlib] Using config output_loads_pF[0] as load: {load_scalar:.4f} pF")
+            output_loads_for_yaml = [load_scalar]
+    else:
+        output_loads_for_yaml = cl.output_loads_pF
     yaml_text = _gen_charlib_yaml(
         lib_name        = "txip_nldm",
         results_dir     = "LIBRARY",
         netlist_path    = "txip.sp",
         model_path      = "model.sp",
         input_slews_ns  = cl.input_slews_ns,
-        output_loads_pF = cl.output_loads_pF,
+        output_loads_pF = output_loads_for_yaml,
         vdd             = proc.vdd,
         temp            = proc.temp,
         lane_count      = cfg.link.lane_count,
@@ -1976,7 +2091,7 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
         )
     print("  [TX/charlib] CharLib complete.")
 
-    load_pF = cl.output_loads_pF[0] if cl.output_loads_pF else 0.0
+    load_pF = output_loads_for_yaml[0] if output_loads_for_yaml else 0.0
     return TxNetlistResult(
         tx_dir                = tx_dir,
         num_stages            = num_stages,
@@ -1988,8 +2103,7 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
         cap_in_pF             = cap_in_pF,
         cap_in_source         = cap_in_source,
         backend               = "charlib",
-        channel_rc_integrated = False,
-        tx_only_dir           = tx_dir,
+        channel_rc_integrated = use_channel_rc,
     )
 
 

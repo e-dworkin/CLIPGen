@@ -208,6 +208,7 @@ class CharLibConfig:
     ngspice_library_path: str   # absolute path to libngspice.so (for charlib shared backend)
     input_slews_ns:       list
     output_loads_pF:      list
+    tx_include_channel_rc: bool = False
 
 
 @dataclass
