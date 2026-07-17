@@ -37,7 +37,7 @@ class RxNetlistResult:
     w_buf_n_um:       float = 0.0
     w_buf_p_um:       float = 0.0
     cap_in_pF:        float = 0.0  # Measured pre-amp input cap (pF)
-    cap_in_source:    str   = ""   # "spice" or "analytical_fallback"
+    cap_in_source:    str   = ""   # "liberate", "charlib", or "analytical_fallback"
     input_slews_ns_used: Optional[List[float]] = None  # Actual slew values used
     backend:          str   = "liberate"  # "liberate" or "charlib"
 
@@ -1318,10 +1318,11 @@ def measure_input_cap(cfg, run_dir: str, term_result=None) -> float:
 
 def parse_rx_pad_capacitance(rx_dir: str) -> Optional[float]:
     """
-    Extract the PAD pin capacitance from the Liberate-generated rxip_nldm.lib.
+    Extract the PAD pin capacitance from rxip_nldm.lib (Liberate or CharLib).
 
     Looks for the first 'pin (PAD_0)' block and returns the 'capacitance'
     value in pF (the library already uses pF units per capacitive_load_unit).
+    Plain Liberty-syntax parsing, works for both Liberate and CharLib backends
 
     Returns None if the file doesn't exist or parsing fails.
     """
@@ -1431,13 +1432,6 @@ def _gen_netlist_charlib(cfg, ch_result, term_result, run_dir: str,
     lane_count = cfg.link.lane_count
     spec       = DeviceSpec.from_cfg(cfg)
 
-    # Analytical cap estimate (Q/V measurement requires ngspice with RX netlist,
-    # which would need its own full implementation; use analytical for now)
-    COX_fF_per_um2 = 8.6
-    cap_pF = (rx_cfg.w_preamp_n_um + rx_cfg.w_preamp_p_um) * tx.l_um * COX_fF_per_um2 * tx.nf / 1000.0
-    cap_source = "analytical_fallback"
-    print(f"  [RX/charlib] cap_in = {cap_pF:.5f} pF  (analytical estimate)")
-
     # Input slew: use TX output slew if available, else fall back to config
     input_slews_ns = cl.input_slews_ns
     if tx_result is not None and getattr(tx_result, 'tx_only_dir', None):
@@ -1543,6 +1537,21 @@ cells:
             f"[RX/charlib] CharLib failed with exit code {proc_cl.returncode} in {rx_dir}"
         )
     print("  [RX/charlib] CharLib complete.")
+
+    # Extract PAD input capacitance from the CharLib-generated .lib (mirrors
+    # the Liberate backend's parse_rx_pad_capacitance() usage below).
+    cap_pF = 0.0
+    cap_source = ""
+    lib_cap = parse_rx_pad_capacitance(rx_dir)
+    if lib_cap is not None:
+        cap_pF = lib_cap
+        cap_source = "charlib"
+        print(f"  [RX/charlib] PAD input cap from .lib: {cap_pF:.5f} pF")
+    else:
+        COX_fF_per_um2 = 8.6
+        cap_pF = (rx_cfg.w_preamp_n_um + rx_cfg.w_preamp_p_um) * tx.l_um * COX_fF_per_um2 * tx.nf / 1000.0
+        cap_source = "analytical_fallback"
+        warnings.warn(f"[RX/charlib] Could not parse .lib cap — analytical fallback: {cap_pF:.5f} pF")
 
     return RxNetlistResult(
         rx_dir              = rx_dir,
