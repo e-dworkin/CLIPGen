@@ -968,7 +968,8 @@ def run_single(cfg: Config, run_dir: str) -> None:
     # ------------------------------------------------------------------
     if getattr(cfg, "clocking", None) is not None and cfg.clocking.enabled:
         import clocking
-        print("\n[clocking] Characterising clock circuits via Spectre "
+        _clk_sim = "ngspice" if cfg.backend == "charlib" else "Spectre"
+        print(f"\n[clocking] Characterising clock circuits via {_clk_sim} "
               "(serializer, deserializer, DCC, DLL, PI)...")
         char_dir = os.path.join(run_dir, "clocking_char")
         hid_meas, char_lines = clocking.characterize(cfg, char_dir)

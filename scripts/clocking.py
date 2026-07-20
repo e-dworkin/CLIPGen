@@ -12,6 +12,7 @@ import os
 import re
 import math
 import argparse
+import subprocess
 from collections import namedtuple
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
@@ -520,6 +521,42 @@ def _deck_serializer(cfg, M: int) -> str:
     ])
 
 
+def _deck_serializer_case(cfg, M: int, vd1_static: bool) -> str:
+    """One independent serializer netlist — ngspice-only, used by generate_testbenches
+    when cfg.backend == "charlib". Does not call or modify _deck_serializer.
+
+    Spectre's _deck_serializer gets both measurements from a single run via
+    `.alter` (re-running the transient with Vd1 changed). ngspice's batch
+    mode doesn't support `.alter` ("unimplemented control card"), so instead
+    this produces the two cases as two independent, .alter-free decks, run
+    separately and combined by _run_and_measure_iavg_ngspice.
+
+    vd1_static=False -> case A ('1010' pattern, d0 != d1): output toggles,
+    worst-case data+clock energy — same as the default (pre-.alter) case in
+    _deck_serializer.
+    vd1_static=True  -> case B ('1111' pattern, d0 == d1): output static,
+    clock-path-only energy — same as _deck_serializer's post-.alter case.
+    """
+    wn, wp, _, _ = _widths(cfg)
+    per, vdd = _clk_period_ps(cfg, M), cfg.process.vdd
+    vd1 = vdd if vd1_static else 0
+    case_label = ("case B 1111: output static -> clock-path energy only" if vd1_static
+                 else "case A 1010: output toggles -> worst-case data+clock energy")
+    return "".join([
+        _tb_header(cfg, f"2:1 serializer, {cfg.link.data_rate_Gbps:g} Gb/s, {case_label}"),
+        _cell_inv(cfg, wn, wp), _cell_tg(cfg, wn, wp),
+        "\n.subckt ser d0 d1 clk y vdd vss\nxinvc clk clkb vdd vss inv\n"
+        "xtg0 d0 yint clk clkb vdd vss tg\nxtg1 d1 yint clkb clk vdd vss tg\n"
+        "xb1 yint yb vdd vss inv\nxb2 yb y vdd vss inv\n.ends ser\n",
+        "\n* real load = txip first stage input\n.subckt txload y vdd vss\n"
+        f"{_mos('n','dnc','y','vss','vss','n', 2*wn, cfg)}\n"
+        f"{_mos('p','dnc','y','vdd','vdd','p', 2*wp, cfg)}\n.ends txload\n",
+        "\n* ---- testbench ----\n", _supplies(cfg), _clk_src(cfg, "Vclk", "clk", per),
+        f"Vd0 d0 0 {vdd}\nVd1 d1 0 {vd1}\nxdut d0 d1 clk y vdd vss ser\nxld y vdd vss txload\n\n",
+        f".tran 0.1p {3*per:g}p\n.measure tran iavg avg i(vvdd) from={per:g}p to={3*per:g}p\n.end\n",
+    ])
+
+
 def _deck_deserializer(cfg, M: int) -> str:
     wn, wp, _, _ = _widths(cfg)
     per, vdd = _clk_period_ps(cfg, M), cfg.process.vdd
@@ -616,24 +653,54 @@ def _run_sh(filename: str):
 
 
 def generate_testbenches(cfg, out_dir: str, ratio=None, circuits=None) -> dict:
-    """Write PDK-correct .scs + run.sh for each clocking circuit. -> {name: path}."""
+    """Write PDK-correct decks for each clocking circuit. -> {name: path}.
+
+    Liberate backend: <name>.scs + run.sh (spectre -64 ...), unchanged.
+    CharLib backend: <name>.sp with 'simulator lang=...' lines stripped (ngspice
+    doesn't understand that directive — same strip tx.py's
+    _measure_inv_cap_ngspice applies to its model header), no run.sh — ngspice
+    is invoked directly, mirroring _measure_inv_cap_ngspice's own pattern.
+    """
     M = parse_ratio(ratio)
     if M is None:
         _, M, _ = ucie_default_mode(cfg.link.data_rate_Gbps)
     names = list(circuits) if circuits else list(_TB_DECKS)
+    use_ngspice = getattr(cfg, "backend", "liberate") == "charlib"
     written = {}
     for name in names:
         cdir = os.path.join(out_dir, name)
         os.makedirs(cdir, exist_ok=True)
-        scs = os.path.join(cdir, f"{name}.scs")
-        with open(scs, "w") as fh:
-            fh.write(_TB_DECKS[name](cfg, M))
-        sh_text = _run_sh(f"{name}.scs")
-        sh = os.path.join(cdir, "run.sh")
-        with open(sh, "w") as fh:
-            fh.write(sh_text)
-        os.chmod(sh, 0o755)
-        written[name] = scs
+        if use_ngspice:
+            if name == "serializer":
+                # ngspice has no equivalent to Spectre's `.alter` (used by
+                # _deck_serializer to get 2 measurements from one run — see
+                # _deck_serializer_case's docstring), so write the two cases
+                # as independent decks instead. _deck_serializer itself is
+                # not called here.
+                for vd1_static, suffix in ((False, ""), (True, "_b")):
+                    case_text = _deck_serializer_case(cfg, M, vd1_static)
+                    case_text = re.sub(r'^\s*simulator\s+lang\s*=.*$', '', case_text,
+                                       flags=re.MULTILINE)
+                    with open(os.path.join(cdir, f"serializer{suffix}.sp"), "w") as fh:
+                        fh.write(case_text)
+                path = os.path.join(cdir, "serializer.sp")
+            else:
+                deck_text = _TB_DECKS[name](cfg, M)
+                deck_text = re.sub(r'^\s*simulator\s+lang\s*=.*$', '', deck_text,
+                                   flags=re.MULTILINE)
+                path = os.path.join(cdir, f"{name}.sp")
+                with open(path, "w") as fh:
+                    fh.write(deck_text)
+        else:
+            deck_text = _TB_DECKS[name](cfg, M)
+            path = os.path.join(cdir, f"{name}.scs")
+            with open(path, "w") as fh:
+                fh.write(deck_text)
+            sh = os.path.join(cdir, "run.sh")
+            with open(sh, "w") as fh:
+                fh.write(_run_sh(f"{name}.scs"))
+            os.chmod(sh, 0o755)
+        written[name] = path
     return written
 
 
@@ -654,6 +721,21 @@ def _parse_all_iavg(measure_path: str):
         return [abs(float(x)) for x in _IAVG_RE.findall(fh.read())]
 
 
+def _parse_all_iavg_ngspice(stdout_text: str) -> List[float]:
+    """All |iavg| values (A) from ngspice batch-mode stdout (one per .alter run).
+
+    Line-anchored match (mirrors tx.py's _measure_inv_cap_ngspice), so an
+    echoed '.measure tran iavg ...' directive line doesn't get picked up —
+    only an actual result line, which starts with the measurement name.
+    """
+    vals = []
+    for line in stdout_text.splitlines():
+        m = re.match(r'\s*iavg\s*=\s*([\d.eE+\-]+)', line, re.IGNORECASE)
+        if m:
+            vals.append(abs(float(m.group(1))))
+    return vals
+
+
 def energy_fj_per_bit(iavg_A: float, vdd: float, data_rate_Gbps: float) -> float:
     """Average supply current -> energy per data bit (fJ)."""
     return (iavg_A * vdd) / (data_rate_Gbps * 1e9) * 1e15
@@ -663,16 +745,107 @@ def power_uW(iavg_A: float, vdd: float) -> float:
     return iavg_A * vdd * 1e6
 
 
+def _run_and_measure_iavg_spectre(cdir: str, name: str, run: bool,
+                                   timeout_s: int) -> Tuple[List[float], str]:
+    """Run one clocking-circuit deck via Spectre; return (iavg values, status).
+
+    Extracted from characterize()'s previous inline loop body — same
+    behavior, including trying to parse the .measure file even when the
+    subprocess itself failed (a stale/partial file may still be usable).
+    """
+    status = None
+    if run:
+        try:
+            proc = subprocess.run(["bash", "run.sh"], cwd=cdir,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  timeout=timeout_s)
+            if proc.returncode != 0:
+                status = "fallback: spectre rc!=0"
+        except Exception as e:
+            status = f"fallback: {type(e).__name__}"
+    vals = _parse_all_iavg(os.path.join(cdir, f"{name}.measure"))
+    if status is None:
+        status = "measured" if vals else "fallback: no .measure output"
+    return vals, status
+
+
+def _run_one_ngspice_deck(cdir: str, filename: str, ngspice_exe: str,
+                          timeout_s: int) -> Tuple[List[float], Optional[str]]:
+    """Run one ngspice deck via batch mode; return (iavg values, failure status).
+
+    status is None when the subprocess itself ran fine (regardless of
+    whether any iavg values were found — the caller decides what that
+    means). Persists the captured stdout/stderr to <stem>.log next to the
+    deck — ngspice, unlike Spectre, doesn't leave any log/raw file behind on
+    its own, so without this a failure is undiagnosable after the fact
+    (mirrors the .log file Spectre already produces for its own runs).
+    """
+    log_path = os.path.join(cdir, os.path.splitext(filename)[0] + ".log")
+    try:
+        proc = subprocess.run([ngspice_exe, "-b", filename], cwd=cdir,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              timeout=timeout_s)
+        output = proc.stdout.decode("utf-8", errors="replace") if proc.stdout else ""
+        with open(log_path, "w") as fh:
+            fh.write(output)
+        vals = _parse_all_iavg_ngspice(output)
+        status = "fallback: ngspice rc!=0" if (proc.returncode != 0 and not vals) else None
+        return vals, status
+    except Exception as e:
+        with open(log_path, "w") as fh:
+            fh.write(f"{type(e).__name__}: {e}\n")
+        return [], f"fallback: {type(e).__name__}"
+
+
+def _run_and_measure_iavg_ngspice(cdir: str, name: str, ngspice_exe: str, run: bool,
+                                   timeout_s: int) -> Tuple[List[float], str]:
+    """Run one clocking-circuit deck via ngspice batch mode; return (iavg values, status).
+
+    Mirrors tx.py's _measure_inv_cap_ngspice: direct `ngspice -b` subprocess
+    call, no shared library, no PySpice — result parsed straight off stdout.
+
+    The serializer is a special case: generate_testbenches() writes it as
+    two independent decks (serializer.sp / serializer_b.sp) since ngspice
+    has no `.alter` equivalent — both are run here and their iavg values
+    combined into the same 2-value list _ser_typ() expects (index 0 = case
+    A '1010'/toggling, index 1 = case B '1111'/static), matching the order
+    Spectre's single .alter-based run already produces.
+    """
+    status = None
+    vals: List[float] = []
+    if run:
+        if name == "serializer":
+            vals_a, status_a = _run_one_ngspice_deck(cdir, "serializer.sp", ngspice_exe, timeout_s)
+            vals_b, status_b = _run_one_ngspice_deck(cdir, "serializer_b.sp", ngspice_exe, timeout_s)
+            if vals_a and vals_b:
+                vals = vals_a + vals_b
+            status = status_a or status_b
+        else:
+            vals, status = _run_one_ngspice_deck(cdir, f"{name}.sp", ngspice_exe, timeout_s)
+    if status is None:
+        status = "measured" if vals else "fallback: no ngspice output"
+    return vals, status
+
+
+def _run_and_measure_iavg(name: str, cdir: str, cfg, run: bool = True,
+                          timeout_s: int = 1800) -> Tuple[List[float], str]:
+    """Dispatch to the selected backend."""
+    if cfg.backend == "charlib":
+        return _run_and_measure_iavg_ngspice(cdir, name, cfg.charlib.ngspice_executable,
+                                             run, timeout_s)
+    return _run_and_measure_iavg_spectre(cdir, name, run, timeout_s)
+
+
 def characterize(cfg, out_dir: str, run: bool = True, timeout_s: int = 1800):
     """Generate + run the clocking-circuit decks; return (ClockingHiddenConfig, report_lines).
 
-    Measured Spectre results replace the config estimates per circuit.  Any
-    circuit whose sim fails (no Cadence env, sim error, missing output) falls
-    back to the config's clocking_hidden value, recorded in the report.
+    Measured results (Spectre or ngspice, per cfg.backend) replace the config
+    estimates per circuit.  Any circuit whose sim fails (no simulator env, sim
+    error, missing output) falls back to the config's clocking_hidden value,
+    recorded in the report.
 
-    Decks + run.sh + outputs land in out_dir/<circuit>/.
+    Decks + outputs land in out_dir/<circuit>/.
     """
-    import subprocess
     clk  = getattr(cfg, "clocking", None) or ClockingConfig()
     hid0 = getattr(cfg, "clocking_hidden", None) or ClockingHiddenConfig()
     vdd, R = cfg.process.vdd, cfg.link.data_rate_Gbps
@@ -680,23 +853,12 @@ def characterize(cfg, out_dir: str, run: bool = True, timeout_s: int = 1800):
     decks = generate_testbenches(cfg, out_dir, ratio=clk.ratio)
 
     iavgs, status = {}, {}
-    for name, scs in decks.items():
-        cdir = os.path.dirname(scs)
-        if run:
-            try:
-                proc = subprocess.run(["bash", "run.sh"], cwd=cdir,
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                      timeout=timeout_s)
-                if proc.returncode != 0:
-                    status[name] = "fallback: spectre rc!=0"
-            except Exception as e:
-                status[name] = f"fallback: {type(e).__name__}"
-        vals = _parse_all_iavg(os.path.join(cdir, f"{name}.measure"))
+    for name, path in decks.items():
+        cdir = os.path.dirname(path)
+        vals, stat = _run_and_measure_iavg(name, cdir, cfg, run=run, timeout_s=timeout_s)
+        status[name] = stat
         if vals:
             iavgs[name] = vals
-            status.setdefault(name, "measured")
-        else:
-            status.setdefault(name, "fallback: no .measure output")
 
     # serializer typical (alpha=0.5): E(1111 clock-only) + 0.5*(E(1010 worst) - E(1111))
     def _ser_typ():
@@ -723,7 +885,8 @@ def characterize(cfg, out_dir: str, run: bool = True, timeout_s: int = 1800):
         deskew_required_min_GTs   = hid0.deskew_required_min_GTs,
     )
 
-    lines = ["  Clocking-circuit characterization (Spectre):"]
+    sim_label = "ngspice" if cfg.backend == "charlib" else "Spectre"
+    lines = [f"  Clocking-circuit characterization ({sim_label}):"]
     for nm, unit, val in (("serializer",  "fJ/stage",  hid.serializer_fj_per_stage),
                           ("deserializer", "fJ/stage",  hid.deserializer_fj_per_stage),
                           ("dcc",          "uW/domain", hid.dcc_power_uW),
