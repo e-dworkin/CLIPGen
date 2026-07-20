@@ -1495,6 +1495,9 @@ settings:
     pwell:
       name: VPW
       voltage: 0.0
+  logic_thresholds:
+    low: {cl.logic_threshold_low}
+    high: {cl.logic_threshold_high}
   temperature: {proc.temp}
   cell_defaults:
     netlist: rxip.sp

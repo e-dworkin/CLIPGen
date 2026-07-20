@@ -1291,6 +1291,8 @@ def _gen_charlib_yaml(
     temp:            float,
     lane_count:      int,
     cell_name:       str = "txip",
+    logic_threshold_low:  float = 0.2,
+    logic_threshold_high: float = 0.8,
 ) -> str:
     """Generate a CharLib YAML configuration for the tx or txip cell."""
     if cell_name == "tx":
@@ -1328,6 +1330,9 @@ settings:
     pwell:
       name: VPW
       voltage: 0.0
+  logic_thresholds:
+    low: {logic_threshold_low}
+    high: {logic_threshold_high}
   temperature: {temp}
   cell_defaults:
     netlist: {netlist_path}
@@ -1429,6 +1434,8 @@ def _gen_tx_only_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistResu
         vdd             = proc.vdd,
         temp            = proc.temp,
         lane_count      = cfg.link.lane_count,
+        logic_threshold_low  = cl.logic_threshold_low,
+        logic_threshold_high = cl.logic_threshold_high,
     )
     _write(tx_only_dir, "charlib_only.yaml", yaml_text)
 
@@ -1716,6 +1723,8 @@ def _gen_tx_channel_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistR
         vdd             = proc.vdd,
         temp            = proc.temp,
         lane_count      = cfg.link.lane_count,
+        logic_threshold_low  = cl.logic_threshold_low,
+        logic_threshold_high = cl.logic_threshold_high,
     ))
 
     print(f"  [TX+channel/charlib] Running CharLib in {tx_channel_dir} ...")
@@ -2068,6 +2077,8 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
         vdd             = proc.vdd,
         temp            = proc.temp,
         lane_count      = cfg.link.lane_count,
+        logic_threshold_low  = cl.logic_threshold_low,
+        logic_threshold_high = cl.logic_threshold_high,
     )
     _write(tx_dir, "charlib.yaml", yaml_text)
 
