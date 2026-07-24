@@ -8,6 +8,7 @@ Public API (called by main.py):
     gen_netlist(cfg, ch_result, term_result, run_dir) -> RxNetlistResult
 """
 
+import glob
 import math
 import os
 import re
@@ -1361,15 +1362,24 @@ def _pick_3_slews(slews: List[float]) -> List[float]:
 
 def _parse_tx_output_transition(tx_dir: str) -> Optional[List[float]]:
     """
-    Parse the TX Liberate NLDM .lib file for output transition (slew) values.
+    Parse the TX NLDM .lib file for output transition (slew) values.
 
     Extracts rise_transition and fall_transition values from PAD pin timing
-    arcs in txip_nldm.lib.  Returns a sorted list of unique slew values (ns),
-    or None if parsing fails.
+    arcs. Returns a sorted list of unique slew values (ns), or None if
+    parsing fails.
+
+    Liberate always names this file txip_nldm.lib regardless of which run
+    directory (tx, tx_only, tx_channel) it came from. CharLib names it after
+    the configured lib_name instead, so fall back to whatever single .lib
+    file is actually in LIBRARY/.
     """
-    lib_path = os.path.join(tx_dir, "LIBRARY", "txip_nldm.lib")
+    lib_dir = os.path.join(tx_dir, "LIBRARY")
+    lib_path = os.path.join(lib_dir, "txip_nldm.lib")
     if not os.path.exists(lib_path):
-        return None
+        candidates = sorted(glob.glob(os.path.join(lib_dir, "*.lib")))
+        if not candidates:
+            return None
+        lib_path = candidates[0]
 
     with open(lib_path) as f:
         content = f.read()
