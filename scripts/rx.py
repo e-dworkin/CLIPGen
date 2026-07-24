@@ -1442,10 +1442,18 @@ def _gen_netlist_charlib(cfg, ch_result, term_result, run_dir: str,
     lane_count = cfg.link.lane_count
     spec       = DeviceSpec.from_cfg(cfg)
 
-    # Input slew: use TX output slew if available, else fall back to config
+    # Input slew: use TX output slew if available, else fall back to config.
+    # rx_slew_source selects which TX run provides the input slew
+    #   "tx_pad"  → TX output at pad (tx_only run, before channel RC)
+    #   "channel" → signal at far end of channel (main TX run)
     input_slews_ns = cl.input_slews_ns
-    if tx_result is not None and getattr(tx_result, 'tx_only_dir', None):
-        tx_slews = _parse_tx_output_transition(tx_result.tx_only_dir)
+    if tx_result is not None:
+        slew_pref = getattr(rx_cfg, 'rx_slew_source', 'tx_pad')
+        if slew_pref == 'tx_pad' and getattr(tx_result, 'tx_only_dir', None):
+            slew_dir = tx_result.tx_only_dir
+        else:
+            slew_dir = tx_result.tx_dir
+        tx_slews = _parse_tx_output_transition(slew_dir)
         if tx_slews and len(tx_slews) >= 2:
             input_slews_ns = _pick_3_slews(tx_slews)
 
