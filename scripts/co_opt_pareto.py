@@ -902,6 +902,8 @@ def run_co_opt(
     cfg_explore = copy.deepcopy(cfg)
     tx_input_slew_ns = rise_fall_pct_ui * ui_ns
     cfg_explore.liberate.input_slews_ns = [tx_input_slew_ns]
+    if cfg_explore.charlib is not None:
+        cfg_explore.charlib.input_slews_ns = [tx_input_slew_ns]
 
     total_pairs = n_tx_configs * n_rx_configs
 

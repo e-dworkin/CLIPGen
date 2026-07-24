@@ -1063,6 +1063,8 @@ def run_single(cfg: Config, run_dir: str) -> None:
             ui_ns_pt = 1.0 / data_rate_Hz_pt * 1e9
             tx_input_slew_ns = cfg.co_opt.rise_fall_pct_ui * ui_ns_pt
             cfg_point.liberate.input_slews_ns = [tx_input_slew_ns]
+            if cfg_point.charlib is not None:
+                cfg_point.charlib.input_slews_ns = [tx_input_slew_ns]
 
             cfg_liberate = copy.deepcopy(cfg_point)
 
