@@ -1158,36 +1158,52 @@ def _gen_channel_spice_section(
 ) -> List[str]:
     """Return SPICE element lines for the channel Pi-ladder.
 
-    Topology from node_in (TXPAD) to node_out (RX device input):
-      C_pad_chip (shunt) → R_bump → C_bump/C_tr_near (shunt) →
-      R_tr1 → C_tr1 (shunt) → R_tr2 → C_tr2 (shunt) →
+    Topology from node_in (TXPAD) to node_out (RX device input), mirroring
+    templates/freepdk45_liberate_template/txip/txip.scs's channel subckt
+    element-for-element:
+      C_pad_chip, C_esd (shunt at node_in) → R_pad_chip →
+      C_bump (shunt) → R_bump →
+      C_pad_ipos_tx (shunt) → R_pad_ipos_tx →
+      C_tr_near (shunt) → R_tr1 → C_tr1 (shunt) → R_tr2 → C_tr2 (shunt) →
       R_tr3 → C_tr_far (shunt) → R_pad_ipos → C_pad_ipos (shunt) →
       [if include_rx_bump_pad: R_rx_bump → C_rx_bump (shunt) → R_rx_pad → C_rx_pad (shunt)] →
       C_rx_esd (shunt at node_out)
 
-    Values match the Spectre parameter substitution in _gen_txip_scs:
+    Values match the Spectre parameter substitution in the Liberate template:
       trace split into 3 equal R segments and Pi-ladder shunt caps
       (C_near = C_far = trace_C_fF/6; C_mid1 = C_mid2 = trace_C_fF/3).
+      TX and RX sides reuse the same single chip-pad/bump/interposer-pad/ESD
+      parameters (pad_chiplet_*, bump_*, pad_interposer_*, esd_C_fF) from
+      ch_result — the channel model treats both ends of the link as
+      physically symmetric, so each set of values is applied once per end.
     """
     lines = []
 
-    # TX chiplet pad (shunt at input)
+    # TX chiplet pad + TX-side ESD clamp (both shunt at node_in)
     lines.append(f"Cpad_chip {node_in} VSS {ch_result.pad_chiplet_C_fF:.4f}f")
+    lines.append(f"Cesd {node_in} VSS {ch_result.esd_C_fF:.4f}f")
+
+    # TX chiplet pad series resistance
+    lines.append(f"Rpad_chip {node_in} n_bump {ch_result.pad_chiplet_R_ohm:.6f}")
 
     # TX bump
-    lines.append(f"Rbump {node_in} n_bump {ch_result.bump_R_ohm:.6f}")
     lines.append(f"Cbump n_bump VSS {ch_result.bump_C_fF:.4f}f")
+    lines.append(f"Rbump n_bump n_ipad_tx {ch_result.bump_R_ohm:.6f}")
+
+    # TX interposer pad
+    lines.append(f"Cpad_ipos_tx n_ipad_tx VSS {ch_result.pad_interposer_C_fF:.4f}f")
+    lines.append(f"Rpad_ipos_tx n_ipad_tx n_tr0 {ch_result.pad_interposer_R_ohm:.6f}")
 
     # Trace Pi-ladder: near shunt + 3 R–C segments + far shunt
-    lines.append(f"Ctr_near n_bump VSS {ch_result.trace_C_fF / 6.0:.4f}f")
-    lines.append(f"Rtr1 n_bump n_tr1 {ch_result.trace_R_ohm / 3.0:.6f}")
+    lines.append(f"Ctr_near n_tr0 VSS {ch_result.trace_C_fF / 6.0:.4f}f")
+    lines.append(f"Rtr1 n_tr0 n_tr1 {ch_result.trace_R_ohm / 3.0:.6f}")
     lines.append(f"Ctr1 n_tr1 VSS {ch_result.trace_C_fF / 3.0:.4f}f")
     lines.append(f"Rtr2 n_tr1 n_tr2 {ch_result.trace_R_ohm / 3.0:.6f}")
     lines.append(f"Ctr2 n_tr2 VSS {ch_result.trace_C_fF / 3.0:.4f}f")
     lines.append(f"Rtr3 n_tr2 n_tr3 {ch_result.trace_R_ohm / 3.0:.6f}")
     lines.append(f"Ctr_far n_tr3 VSS {ch_result.trace_C_fF / 6.0:.4f}f")
 
-    # TX interposer pad → either terminates at node_out or continues through RX bump/pad
+    # RX interposer pad → either terminates at node_out or continues through RX bump/pad
     if include_rx_bump_pad:
         lines.append(f"Rpad_ipos n_tr3 n_ipad {ch_result.pad_interposer_R_ohm:.6f}")
         lines.append(f"Cpad_ipos n_ipad VSS {ch_result.pad_interposer_C_fF:.4f}f")
