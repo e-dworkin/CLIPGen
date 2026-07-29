@@ -343,6 +343,9 @@ def _gen_rxip_sp(
     use_termination: bool  = False,
     r_rx_ohm:        float = 50.0,
     spec:            Optional[DeviceSpec] = None,
+    cc_enabled:      bool  = False,
+    cc_rx_pad_fF:    float = 1.0,
+    signal_pairs:    Optional[list] = None,
 ) -> str:
     """
     Generate a plain SPICE netlist for the RX cell (CharLib backend).
@@ -378,6 +381,16 @@ def _gen_rxip_sp(
     lines.append(f".subckt rxip {port_str}")
     for i in range(lane_count):
         lines.append(f"xrx{i} PAD_{i} VDD VSS OUT_{i} rx")
+
+    if cc_enabled and lane_count >= 2:
+        import tx as tx_mod
+        cc_pairs = tx_mod._build_cc_pairs(lane_count, signal_pairs)
+        lines.append("")
+        lines.append(f"* ---- Inter-lane PAD-to-PAD coupling ({len(cc_pairs)} pairs) ----")
+        for li, lj, scale in cc_pairs:
+            val = scale * cc_rx_pad_fF
+            lines.append(f"Cc_pad_{li}_{lj} PAD_{li} PAD_{lj} {val:.4f}f")
+
     lines += [".ends rxip", ""]
 
     return "\n".join(lines)
@@ -1458,6 +1471,8 @@ def _gen_netlist_charlib(cfg, ch_result, term_result, run_dir: str,
             input_slews_ns = _pick_3_slews(tx_slews)
 
     # Write rxip.sp
+    cc_enabled, cc_rx_pad_fF = _coupling_cap_from_cfg(cfg)
+    signal_pairs = _rx_signal_pairs_from_cfg(cfg)
     sp_text = _gen_rxip_sp(
         lane_count      = lane_count,
         w_preamp_n      = rx_cfg.w_preamp_n_um,
@@ -1471,6 +1486,9 @@ def _gen_netlist_charlib(cfg, ch_result, term_result, run_dir: str,
         use_termination = use_term,
         r_rx_ohm        = r_rx,
         spec            = spec,
+        cc_enabled      = cc_enabled,
+        cc_rx_pad_fF    = cc_rx_pad_fF,
+        signal_pairs    = signal_pairs,
     )
     _write(rx_dir, "rxip.sp", sp_text)
 

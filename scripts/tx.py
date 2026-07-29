@@ -42,6 +42,33 @@ def _tx_signal_pairs_from_cfg(cfg) -> Optional[list]:
         return None
     return getattr(lay, "tx_signal_pairs", None)
 
+
+_SHIELD_SUPPRESSION = 0.1
+
+
+def _build_cc_pairs(lane_count: int,
+                     signal_pairs: Optional[list]) -> List[Tuple[int, int, float]]:
+    """
+    (lane_i, lane_j, scale) triples for inter-lane coupling-cap generation.
+
+    scale = 1/dist_pitches for bump-map pairs (shielded pairs suppressed to
+    _SHIELD_SUPPRESSION), or 1.0 per sequential pair when no bump map is
+    available. Shared by the Liberate wrapper (_gen_txip_wrapper_scs) and
+    the CharLib wrapper (_gen_txip_wrapper_sp) so both backends use
+    identical pair topology and scale factors.
+    """
+    if lane_count < 2:
+        return []
+    if signal_pairs is not None:
+        pairs = []
+        for sp in signal_pairs:
+            scale = (1.0 / sp.dist_pitches) if sp.dist_pitches > 0 else 1.0
+            if sp.shielded:
+                scale *= _SHIELD_SUPPRESSION
+            pairs.append((sp.lane_i, sp.lane_j, scale))
+        return pairs
+    return [(i, i + 1, 1.0) for i in range(lane_count - 1)]
+
 # ---------------------------------------------------------------------------
 # Result dataclass
 # ---------------------------------------------------------------------------
@@ -596,20 +623,7 @@ def _gen_txip_wrapper_scs(lane_count: int,
 
     # ---- Build coupling pair list ----
     # Each entry: (lane_i, lane_j, scale_factor)
-    # scale_factor = 1/dist for bump-map pairs, 1.0 for sequential fallback
-    _SHIELD_SUPPRESSION = 0.1
-    cc_pairs = []
-    if use_coupling_cap and lane_count >= 2:
-        if signal_pairs is not None:
-            for sp in signal_pairs:
-                scale = (1.0 / sp.dist_pitches) if sp.dist_pitches > 0 else 1.0
-                if sp.shielded:
-                    scale *= _SHIELD_SUPPRESSION
-                cc_pairs.append((sp.lane_i, sp.lane_j, scale))
-        else:
-            # Sequential fallback (no bump map)
-            for i in range(lane_count - 1):
-                cc_pairs.append((i, i + 1, 1.0))
+    cc_pairs = _build_cc_pairs(lane_count, signal_pairs) if use_coupling_cap else []
 
     # ---- Inter-lane coupling capacitance ----
     if lane_count >= 2:
@@ -1150,111 +1164,25 @@ def _gen_txip_sp(
     return "\n".join(lines)
 
 
-def _gen_channel_spice_section(
-    ch_result,
-    include_rx_bump_pad: bool,
-    node_in: str,
-    node_out: str,
+def _gen_tx_driver_subckt_sp(
+    name:      str,
+    inv_sizes: List[Tuple[float, float]],
+    use_eq:    bool,
+    R_eq_ohm:  float,
+    C_eq_fF:   float,
+    l_um:      float,
+    nmos_name: str,
+    pmos_name: str,
+    nf:        int,
+    spec:      DeviceSpec,
+    w_max_um:  float,
+    nf_auto:   bool,
 ) -> List[str]:
-    """Return SPICE element lines for the channel Pi-ladder.
-
-    Topology from node_in (TXPAD) to node_out (RX device input), mirroring
-    templates/freepdk45_liberate_template/txip/txip.scs's channel subckt
-    element-for-element:
-      C_pad_chip, C_esd (shunt at node_in) → R_pad_chip →
-      C_bump (shunt) → R_bump →
-      C_pad_ipos_tx (shunt) → R_pad_ipos_tx →
-      C_tr_near (shunt) → R_tr1 → C_tr1 (shunt) → R_tr2 → C_tr2 (shunt) →
-      R_tr3 → C_tr_far (shunt) → R_pad_ipos → C_pad_ipos (shunt) →
-      [if include_rx_bump_pad: R_rx_bump → C_rx_bump (shunt) → R_rx_pad → C_rx_pad (shunt)] →
-      C_rx_esd (shunt at node_out)
-
-    Values match the Spectre parameter substitution in the Liberate template:
-      trace split into 3 equal R segments and Pi-ladder shunt caps
-      (C_near = C_far = trace_C_fF/6; C_mid1 = C_mid2 = trace_C_fF/3).
-      TX and RX sides reuse the same single chip-pad/bump/interposer-pad/ESD
-      parameters (pad_chiplet_*, bump_*, pad_interposer_*, esd_C_fF) from
-      ch_result — the channel model treats both ends of the link as
-      physically symmetric, so each set of values is applied once per end.
-    """
-    lines = []
-
-    # TX chiplet pad + TX-side ESD clamp (both shunt at node_in)
-    lines.append(f"Cpad_chip {node_in} VSS {ch_result.pad_chiplet_C_fF:.4f}f")
-    lines.append(f"Cesd {node_in} VSS {ch_result.esd_C_fF:.4f}f")
-
-    # TX chiplet pad series resistance
-    lines.append(f"Rpad_chip {node_in} n_bump {ch_result.pad_chiplet_R_ohm:.6f}")
-
-    # TX bump
-    lines.append(f"Cbump n_bump VSS {ch_result.bump_C_fF:.4f}f")
-    lines.append(f"Rbump n_bump n_ipad_tx {ch_result.bump_R_ohm:.6f}")
-
-    # TX interposer pad
-    lines.append(f"Cpad_ipos_tx n_ipad_tx VSS {ch_result.pad_interposer_C_fF:.4f}f")
-    lines.append(f"Rpad_ipos_tx n_ipad_tx n_tr0 {ch_result.pad_interposer_R_ohm:.6f}")
-
-    # Trace Pi-ladder: near shunt + 3 R–C segments + far shunt
-    lines.append(f"Ctr_near n_tr0 VSS {ch_result.trace_C_fF / 6.0:.4f}f")
-    lines.append(f"Rtr1 n_tr0 n_tr1 {ch_result.trace_R_ohm / 3.0:.6f}")
-    lines.append(f"Ctr1 n_tr1 VSS {ch_result.trace_C_fF / 3.0:.4f}f")
-    lines.append(f"Rtr2 n_tr1 n_tr2 {ch_result.trace_R_ohm / 3.0:.6f}")
-    lines.append(f"Ctr2 n_tr2 VSS {ch_result.trace_C_fF / 3.0:.4f}f")
-    lines.append(f"Rtr3 n_tr2 n_tr3 {ch_result.trace_R_ohm / 3.0:.6f}")
-    lines.append(f"Ctr_far n_tr3 VSS {ch_result.trace_C_fF / 6.0:.4f}f")
-
-    # RX interposer pad → either terminates at node_out or continues through RX bump/pad
-    if include_rx_bump_pad:
-        lines.append(f"Rpad_ipos n_tr3 n_ipad {ch_result.pad_interposer_R_ohm:.6f}")
-        lines.append(f"Cpad_ipos n_ipad VSS {ch_result.pad_interposer_C_fF:.4f}f")
-        # RX bump
-        lines.append(f"Rrx_bump n_ipad n_rxbump {ch_result.bump_R_ohm:.6f}")
-        lines.append(f"Crx_bump n_rxbump VSS {ch_result.bump_C_fF:.4f}f")
-        # RX chiplet pad → connects to output node
-        lines.append(f"Rrx_pad n_rxbump {node_out} {ch_result.pad_chiplet_R_ohm:.6f}")
-        lines.append(f"Crx_pad {node_out} VSS {ch_result.pad_chiplet_C_fF:.4f}f")
-    else:
-        lines.append(f"Rpad_ipos n_tr3 {node_out} {ch_result.pad_interposer_R_ohm:.6f}")
-        lines.append(f"Cpad_ipos {node_out} VSS {ch_result.pad_interposer_C_fF:.4f}f")
-
-    # RX ESD clamp at output node (always present)
-    lines.append(f"Crx_esd {node_out} VSS {ch_result.esd_C_fF:.4f}f")
-
-    return lines
-
-
-def _gen_txip_sp_with_channel(
-    lane_count:          int,
-    inv_sizes:           List[Tuple[float, float]],
-    use_eq:              bool,
-    R_eq_ohm:            float,
-    C_eq_fF:             float,
-    l_um:                float,
-    nmos_name:           str,
-    pmos_name:           str,
-    nf:                  int,
-    ch_result,
-    include_rx_bump_pad: bool,
-    spec:                Optional[DeviceSpec] = None,
-    w_max_um:            float = 900.0,
-    nf_auto:             bool = False,
-) -> str:
-    """
-    Generate a SPICE netlist for the TX cell with the channel Pi-ladder appended.
-
-    Identical to _gen_txip_sp for the inverter chain and EQ section.  After the
-    EQ, TXPAD is an internal intermediate node; _gen_channel_spice_section appends
-    the Pi-ladder from TXPAD to RX_IN, which becomes the unit subckt output port.
-    The N-lane txip wrapper maps PAD_i → the RX_IN port of each unit instance.
-    """
-    if spec is None:
-        spec = DeviceSpec()
-
+    """Return '.subckt {name} IN VDD VSS TXPAD ... .ends {name}' — the inverter
+    chain + EQ only, stopping at the pad node (no channel). Mirrors Liberate's
+    driver-only '.subckt tx in VDD VSS txpad'."""
     num_stages = len(inv_sizes)
-    lines = ["* TX unit driver + channel RC + N-lane wrapper — generated by CLIPGen",
-             "* simulator lang=spice",
-             ""]
-    lines.append(".subckt tx IN VDD VSS RX_IN")
+    lines = [f".subckt {name} IN VDD VSS TXPAD"]
 
     for s, (w_n, w_p) in enumerate(inv_sizes):
         in_node  = "IN"   if s == 0 else f"out{s}"
@@ -1279,19 +1207,186 @@ def _gen_txip_sp_with_channel(
         lines.append("Req eq_in TXPAD 0.001")
         lines.append("Ceq TXPAD VSS 1e-30")
 
-    # Channel Pi-ladder: TXPAD (internal) → RX_IN (output port)
-    lines += _gen_channel_spice_section(ch_result, include_rx_bump_pad, "TXPAD", "RX_IN")
+    lines += [f".ends {name}", ""]
+    return lines
 
-    lines += [".ends tx", ""]
 
-    # N-lane wrapper: PAD_i maps positionally to RX_IN of each unit instance
+def _gen_channel_subckt_sp(
+    name: str,
+    ch_result,
+    include_rx_bump_pad: bool,
+) -> List[str]:
+    """Return '.subckt {name} TXPAD n_bump n_ipad_tx n_tr0 n_tr1 n_tr2 n_tr3
+    [n_ipad n_rxbump] RX_IN VSS ... .ends {name}' — the channel Pi-ladder with
+    every internal node exposed as a port.
+
+    Values match the Spectre parameter substitution in the Liberate template:
+      trace split into 3 equal R segments and Pi-ladder shunt caps
+      (C_near = C_far = trace_C_fF/6; C_mid1 = C_mid2 = trace_C_fF/3).
+      TX and RX sides reuse the same single chip-pad/bump/interposer-pad/ESD
+      parameters (pad_chiplet_*, bump_*, pad_interposer_*, esd_C_fF) from
+      ch_result — the channel model treats both ends of the link as
+      physically symmetric, so each set of values is applied once per end.
+    """
+    port_str = "TXPAD n_bump n_ipad_tx n_tr0 n_tr1 n_tr2 n_tr3"
+    if include_rx_bump_pad:
+        port_str += " n_ipad n_rxbump"
+    port_str += " RX_IN VSS"
+    lines = [f".subckt {name} {port_str}"]
+
+    # TX chiplet pad + TX-side ESD clamp (both shunt at TXPAD)
+    lines.append(f"Cpad_chip TXPAD VSS {ch_result.pad_chiplet_C_fF:.4f}f")
+    lines.append(f"Cesd TXPAD VSS {ch_result.esd_C_fF:.4f}f")
+
+    # TX chiplet pad series resistance
+    lines.append(f"Rpad_chip TXPAD n_bump {ch_result.pad_chiplet_R_ohm:.6f}")
+
+    # TX bump
+    lines.append(f"Cbump n_bump VSS {ch_result.bump_C_fF:.4f}f")
+    lines.append(f"Rbump n_bump n_ipad_tx {ch_result.bump_R_ohm:.6f}")
+
+    # TX interposer pad
+    lines.append(f"Cpad_ipos_tx n_ipad_tx VSS {ch_result.pad_interposer_C_fF:.4f}f")
+    lines.append(f"Rpad_ipos_tx n_ipad_tx n_tr0 {ch_result.pad_interposer_R_ohm:.6f}")
+
+    # Trace Pi-ladder: near shunt + 3 R–C segments + far shunt
+    lines.append(f"Ctr_near n_tr0 VSS {ch_result.trace_C_fF / 6.0:.4f}f")
+    lines.append(f"Rtr1 n_tr0 n_tr1 {ch_result.trace_R_ohm / 3.0:.6f}")
+    lines.append(f"Ctr1 n_tr1 VSS {ch_result.trace_C_fF / 3.0:.4f}f")
+    lines.append(f"Rtr2 n_tr1 n_tr2 {ch_result.trace_R_ohm / 3.0:.6f}")
+    lines.append(f"Ctr2 n_tr2 VSS {ch_result.trace_C_fF / 3.0:.4f}f")
+    lines.append(f"Rtr3 n_tr2 n_tr3 {ch_result.trace_R_ohm / 3.0:.6f}")
+    lines.append(f"Ctr_far n_tr3 VSS {ch_result.trace_C_fF / 6.0:.4f}f")
+
+    # RX interposer pad → either terminates at RX_IN or continues through RX bump/pad
+    if include_rx_bump_pad:
+        lines.append(f"Rpad_ipos n_tr3 n_ipad {ch_result.pad_interposer_R_ohm:.6f}")
+        lines.append(f"Cpad_ipos n_ipad VSS {ch_result.pad_interposer_C_fF:.4f}f")
+        # RX bump
+        lines.append(f"Rrx_bump n_ipad n_rxbump {ch_result.bump_R_ohm:.6f}")
+        lines.append(f"Crx_bump n_rxbump VSS {ch_result.bump_C_fF:.4f}f")
+        # RX chiplet pad → connects to output node
+        lines.append(f"Rrx_pad n_rxbump RX_IN {ch_result.pad_chiplet_R_ohm:.6f}")
+        lines.append(f"Crx_pad RX_IN VSS {ch_result.pad_chiplet_C_fF:.4f}f")
+    else:
+        lines.append(f"Rpad_ipos n_tr3 RX_IN {ch_result.pad_interposer_R_ohm:.6f}")
+        lines.append(f"Cpad_ipos RX_IN VSS {ch_result.pad_interposer_C_fF:.4f}f")
+
+    # RX ESD clamp at output node (always present)
+    lines.append(f"Crx_esd RX_IN VSS {ch_result.esd_C_fF:.4f}f")
+
+    lines += [f".ends {name}", ""]
+    return lines
+
+
+def _gen_txip_wrapper_sp(
+    lane_count:          int,
+    include_rx_bump_pad: bool,
+    cc_enabled:          bool,
+    cc_ratio_trace:      float,
+    cc_ratio_pad:        float,
+    signal_pairs:        Optional[list],
+    ch_result,
+    driver_name:         str = "tx",
+    channel_name:        str = "channel",
+) -> List[str]:
+    """Return '.subckt txip ... .ends txip' - per-lane driver+channel instances
+    stitched together with inter-lane Cc_* coupling capacitors. Structural
+    port of _gen_txip_wrapper_scs (the Liberate wrapper) to plain SPICE: same
+    subckt shape, node names, and coupling-cap naming/placement, with the
+    conditional-value ternary expressions Liberate's reusable Spectre template
+    needs replaced by literal baked values, since CharLib regenerates a fresh
+    netlist per run rather than reusing one template across run modes.
+    """
+    lines = []
     in_pins  = [f"IN_{i}"  for i in range(lane_count)]
     pad_pins = [f"PAD_{i}" for i in range(lane_count)]
-    port_str = " ".join(in_pins) + " " + " ".join(pad_pins) + " VDD VSS"
-    lines.append(f".subckt txip {port_str}")
+    lines.append(f".subckt txip {' '.join(in_pins)} {' '.join(pad_pins)} VDD VSS")
+    lines.append("")
+
+    lines.append("* ---- TX drivers (driver + EQ, one per lane) ----")
     for i in range(lane_count):
-        lines.append(f"xtx{i} IN_{i} VDD VSS PAD_{i} tx")
+        lines.append(f"xtx{i} IN_{i} VDD VSS v{i}_txpad {driver_name}")
+
+    lines.append("")
+    lines.append("* ---- Per-lane channel instances ----")
+    for i in range(lane_count):
+        ch_ports = (f"v{i}_txpad v{i}_bump v{i}_ipad_tx "
+                    f"v{i}_tr0 v{i}_tr1 v{i}_tr2 v{i}_tr3")
+        if include_rx_bump_pad:
+            ch_ports += f" v{i}_ipad v{i}_rxbump"
+        lines.append(f"xch{i} {ch_ports} PAD_{i} VSS {channel_name}")
+
+    if cc_enabled and lane_count >= 2:
+        cc_pairs = _build_cc_pairs(lane_count, signal_pairs)
+        # (prefix, node suffix, ratio, C value) — matches Liberate's
+        # coupling_specs table (see _gen_txip_wrapper_scs) exactly. "ipad" is
+        # CharLib's name for the RX-interposer-pad node — Liberate's
+        # Cc_rxbump target — NOT CharLib's own "n_rxbump" node (see the node
+        # correspondence note in _gen_channel_subckt_sp).
+        node_specs = [
+            ("Cc_ipad_tx", "ipad_tx", cc_ratio_pad,   ch_result.pad_interposer_C_fF),
+            ("Cc_tr_near", "tr0",     cc_ratio_trace, ch_result.trace_C_fF / 6.0),
+            ("Cc_tr1",     "tr1",     cc_ratio_trace, ch_result.trace_C_fF / 3.0),
+            ("Cc_tr2",     "tr2",     cc_ratio_trace, ch_result.trace_C_fF / 3.0),
+            ("Cc_tr_far",  "tr3",     cc_ratio_trace, ch_result.trace_C_fF / 6.0),
+        ]
+        if include_rx_bump_pad:
+            node_specs.append(
+                ("Cc_rxbump", "ipad", cc_ratio_pad, ch_result.pad_interposer_C_fF))
+
+        lines.append("")
+        lines.append(
+            f"* ---- Inter-lane coupling capacitance ({len(cc_pairs)} pairs) ----")
+        for prefix, nsfx, ratio, c_val in node_specs:
+            for li, lj, scale in cc_pairs:
+                val = scale * ratio * c_val
+                lines.append(f"{prefix}_{li}_{lj} v{li}_{nsfx} v{lj}_{nsfx} {val:.4f}f")
+
     lines += [".ends txip", ""]
+    return lines
+
+
+def _gen_txip_sp_with_channel(
+    lane_count:          int,
+    inv_sizes:           List[Tuple[float, float]],
+    use_eq:              bool,
+    R_eq_ohm:            float,
+    C_eq_fF:             float,
+    l_um:                float,
+    nmos_name:           str,
+    pmos_name:           str,
+    nf:                  int,
+    ch_result,
+    include_rx_bump_pad: bool,
+    spec:                Optional[DeviceSpec] = None,
+    w_max_um:            float = 900.0,
+    nf_auto:             bool = False,
+    cc_enabled:          bool = False,
+    cc_ratio_trace:      float = 0.4,
+    cc_ratio_pad:        float = 0.2,
+    signal_pairs:        Optional[list] = None,
+) -> str:
+    """
+    Generate a SPICE netlist for the TX cell with the channel Pi-ladder,
+    a driver-only subckt, a channel subckt with every internal node exposed
+    as a port, and a wrapper that instantiates both per lane and (when
+    cc_enabled) bridges adjacent lanes' channel nodes with coupling capacitors.
+    See _gen_tx_driver_subckt_sp / _gen_channel_subckt_sp / _gen_txip_wrapper_sp.
+    """
+    if spec is None:
+        spec = DeviceSpec()
+
+    lines = ["* TX unit driver + channel RC + N-lane wrapper — generated by CLIPGen",
+             "* simulator lang=spice",
+             ""]
+    lines += _gen_tx_driver_subckt_sp("tx", inv_sizes, use_eq, R_eq_ohm, C_eq_fF,
+                                       l_um, nmos_name, pmos_name, nf, spec,
+                                       w_max_um, nf_auto)
+    lines += _gen_channel_subckt_sp("channel", ch_result, include_rx_bump_pad)
+    lines += _gen_txip_wrapper_sp(lane_count, include_rx_bump_pad, cc_enabled,
+                                   cc_ratio_trace, cc_ratio_pad, signal_pairs,
+                                   ch_result)
 
     return "\n".join(lines)
 
@@ -1712,6 +1807,9 @@ def _gen_tx_channel_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistR
     tx_channel_dir = os.path.join(run_dir, "tx_channel")
     os.makedirs(tx_channel_dir, exist_ok=True)
 
+    cc_enabled, cc_ratio_trace, cc_ratio_pad = _coupling_cap_from_cfg(cfg)
+    signal_pairs = _tx_signal_pairs_from_cfg(cfg)
+
     _write(tx_channel_dir, "txip_ch.sp", _gen_txip_sp_with_channel(
         lane_count          = cfg.link.lane_count,
         inv_sizes           = tx_result.inverter_sizes,
@@ -1727,6 +1825,10 @@ def _gen_tx_channel_run_charlib(cfg, ch_result, eq_result, tx_result: TxNetlistR
         w_max_um            = tx.w_max_um,
         nf_auto             = True,
         include_rx_bump_pad = False,
+        cc_enabled          = cc_enabled,
+        cc_ratio_trace      = cc_ratio_trace,
+        cc_ratio_pad        = cc_ratio_pad,
+        signal_pairs        = signal_pairs,
     ))
     _write(tx_channel_dir, "model.sp", model_text)
     _write(tx_channel_dir, "charlib_ch.yaml", _gen_charlib_yaml(
@@ -2019,6 +2121,8 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
     #    TX+channel+RX-bump/pad topology (matching _gen_netlist_liberate's
     #    use_channel_rc=True branch); otherwise the plain no-channel netlist.
     if use_channel_rc:
+        cc_enabled, cc_ratio_trace, cc_ratio_pad = _coupling_cap_from_cfg(cfg)
+        signal_pairs = _tx_signal_pairs_from_cfg(cfg)
         sp_text = _gen_txip_sp_with_channel(
             lane_count          = cfg.link.lane_count,
             inv_sizes           = inv_sizes,
@@ -2034,6 +2138,10 @@ def _gen_netlist_charlib(cfg, ch_result, eq_result, run_dir: str,
             w_max_um            = tx.w_max_um,
             nf_auto             = True,
             include_rx_bump_pad = True,
+            cc_enabled          = cc_enabled,
+            cc_ratio_trace      = cc_ratio_trace,
+            cc_ratio_pad        = cc_ratio_pad,
+            signal_pairs        = signal_pairs,
         )
     else:
         sp_text = _gen_txip_sp(
