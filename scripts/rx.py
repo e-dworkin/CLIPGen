@@ -1549,7 +1549,7 @@ settings:
   simulation:
     backend: ngspice-shared
     combinational_leakage_procedure: combinational_leakage
-    combinational_dynamic_power_procedure: combinational_dynamic_power
+    combinational_dynamic_power_procedure: combinational_dynamic_power_charge_corrected
     input_capacitance_procedure: charge_integration
   debug: false
 
